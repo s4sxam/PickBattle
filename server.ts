@@ -57,7 +57,7 @@ Use the exact pick labels given to you (e.g. "Pick A", "Pick B") in the ranking 
 
 let aiClient: GoogleGenAI | null = null;
 function getGenAI(): GoogleGenAI | null {
-  const key = process.env.GEMINI_API_KEY;
+  const key = process.env.GEMINI_API_KEY1 || process.env.GEMINI_API_KEY;
   if (!key) return null;
   if (!aiClient) {
     aiClient = new GoogleGenAI({
