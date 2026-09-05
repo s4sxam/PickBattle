@@ -91,7 +91,7 @@ export const LobbyPhase: React.FC<LobbyPhaseProps> = ({
           {room.code}
         </div>
 
-        <div className="flex flex-wrap items-center justify-center gap-2">
+        <div className="flex flex-wrap items-center justify-center gap-2 mb-3">
           <button
             id="lobby-copy-link-btn"
             onClick={handleCopyLink}
@@ -112,6 +112,11 @@ export const LobbyPhase: React.FC<LobbyPhaseProps> = ({
             <QrCode className="w-4 h-4 text-amber-400" />
             <span>Show QR Code</span>
           </button>
+        </div>
+
+        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[11px] font-semibold">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+          <span>Hosted directly in your browser • Serverless &amp; Vercel ready</span>
         </div>
       </motion.div>
 

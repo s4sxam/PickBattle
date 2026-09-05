@@ -98,10 +98,12 @@ export default function App() {
     socket.on('voting:started', handleVotingStarted);
     socket.on('error:message', handleError);
 
-    // Auto-reconnect if stored room code and player ID exist
+    // Auto-reconnect if stored room code and player ID exist (only for non-host guests)
     const savedCode = localStorage.getItem(STORAGE_ROOM_CODE_KEY);
     const savedPlayerId = localStorage.getItem(STORAGE_PLAYER_ID_KEY);
-    if (savedCode && savedPlayerId && !room) {
+    const savedIsHost = localStorage.getItem('pickbattle_is_host') === 'true';
+
+    if (savedCode && savedPlayerId && !room && !savedIsHost) {
       socket.emit(
         'room:join',
         { code: savedCode, name: '', avatarEmoji: '', playerId: savedPlayerId },
@@ -109,9 +111,15 @@ export default function App() {
           if (!res.success) {
             localStorage.removeItem(STORAGE_ROOM_CODE_KEY);
             localStorage.removeItem(STORAGE_PLAYER_ID_KEY);
+            localStorage.removeItem('pickbattle_is_host');
           }
         }
       );
+    } else if (savedIsHost) {
+      // Clear host key on fresh load
+      localStorage.removeItem(STORAGE_ROOM_CODE_KEY);
+      localStorage.removeItem(STORAGE_PLAYER_ID_KEY);
+      localStorage.removeItem('pickbattle_is_host');
     }
 
     return () => {
@@ -137,6 +145,7 @@ export default function App() {
           setMyPlayerId(res.playerId);
           localStorage.setItem(STORAGE_PLAYER_ID_KEY, res.playerId);
           localStorage.setItem(STORAGE_ROOM_CODE_KEY, res.roomCode);
+          localStorage.setItem('pickbattle_is_host', 'true');
           setIsCreateOpen(false);
           playLockIn();
         } else {
@@ -162,6 +171,7 @@ export default function App() {
           setMyPlayerId(res.playerId);
           localStorage.setItem(STORAGE_PLAYER_ID_KEY, res.playerId);
           localStorage.setItem(STORAGE_ROOM_CODE_KEY, res.roomCode);
+          localStorage.removeItem('pickbattle_is_host');
           setIsJoinOpen(false);
           playLockIn();
         } else {
@@ -244,6 +254,9 @@ export default function App() {
   const handleLeaveRoom = useCallback(() => {
     localStorage.removeItem(STORAGE_ROOM_CODE_KEY);
     localStorage.removeItem(STORAGE_PLAYER_ID_KEY);
+    localStorage.removeItem('pickbattle_is_host');
+    const socket = getSocket();
+    socket.disconnect();
     setRoom(null);
     setMyPlayerId(null);
     setVotingOptions([]);
