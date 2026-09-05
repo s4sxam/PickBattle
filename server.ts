@@ -15,6 +15,8 @@ import {
   VotingStartedPayload,
 } from './src/types';
 import { CATEGORIES, FLAVOR_LINES, BOT_NAMES, sanitizeText } from './src/utils/gameData';
+import { GoogleGenAI } from '@google/genai';
+import { fallbackJudge } from './src/utils/aiJudge';
 
 const app = express();
 const httpServer = http.createServer(app);
@@ -29,6 +31,93 @@ const io = new SocketIOServer(httpServer, {
 
 const PORT = 3000;
 app.use(express.json());
+
+// System prompt provided for the AI Judge in PickBattle
+const AI_JUDGE_SYSTEM_PROMPT = `You are the judge for "PickBattle," a fast-paced party game. Each round, players submit a pick within a given category (e.g. their favorite or most powerful anime character, car, athlete, etc.), and your job is to rank the picks from strongest/best to weakest within that category's context and declare a winner.
+
+Rules for judging:
+- Judge based on the most natural interpretation of the category (e.g. for "most powerful," reason about raw capability/feats within that fictional or real-world context; for "favorite," reason about broad cultural popularity and impact).
+- For a "Cars" category: judge by real-world performance specs — top speed, 0-60 acceleration, horsepower, and overall engineering pedigree. Prefer verifiable performance facts over brand hype.
+- For a "Food" category: judge by broad, genuine culinary merit — global popularity, flavor complexity, and cultural significance. Don't rank by novelty alone, and don't let an obscure dish beat a beloved staple just because it sounds fancier.
+- Judge only the picks given — never invent extra picks, never change the category.
+- If a pick is nonsensical, empty, or not a real recognizable answer for the category, rank it last rather than rejecting the round.
+- If two picks are effectively identical (typos, capitalization, obvious duplicates), treat them as tied.
+- Be decisive. Every round needs exactly one winner — do not return ties for first place.
+- Keep your reasoning short: one punchy sentence per pick explaining its placement, written for a phone screen, not an essay.
+- You are allowed to be playful and a little dramatic in tone, but the ranking itself must be your genuine best judgment, not random.
+
+You must respond with ONLY valid JSON matching this exact shape, no extra text before or after:
+
+{
+  "ranking": ["Pick B", "Pick A", "Pick C"],
+  "verdict": "One short, punchy sentence explaining why the winner takes it."
+}
+
+Use the exact pick labels given to you (e.g. "Pick A", "Pick B") in the ranking array, ordered from winner first to last place. Do not use real player names — you will not be given any.`;
+
+let aiClient: GoogleGenAI | null = null;
+function getGenAI(): GoogleGenAI | null {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key) return null;
+  if (!aiClient) {
+    aiClient = new GoogleGenAI({
+      apiKey: key,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        },
+      },
+    });
+  }
+  return aiClient;
+}
+
+// Server-side pick evaluator using Gemini with silent fallback
+async function evaluatePicks(category: string, items: { label: string; pick: string }[]) {
+  const ai = getGenAI();
+  if (ai) {
+    try {
+      const picksDescription = items.map((it) => `${it.label}: ${it.pick}`).join('\n');
+      const userContent = `Category: ${category}\n\nPicks to judge:\n${picksDescription}`;
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.8-flash',
+        contents: userContent,
+        config: {
+          systemInstruction: AI_JUDGE_SYSTEM_PROMPT,
+          responseMimeType: 'application/json',
+          temperature: 0.3,
+        },
+      });
+
+      const text = response.text?.trim();
+      if (text) {
+        const parsed = JSON.parse(text);
+        if (Array.isArray(parsed.ranking) && typeof parsed.verdict === 'string') {
+          return {
+            ranking: parsed.ranking,
+            verdict: parsed.verdict,
+          };
+        }
+      }
+    } catch (_) {
+      // Gracefully fall through to reliable fallback judge
+    }
+  }
+
+  return fallbackJudge(category, items);
+}
+
+// Public API endpoint for AI Judge evaluation
+app.post('/api/ai-judge', async (req, res) => {
+  const { category, items } = req.body || {};
+  if (!category || !Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ error: 'Invalid category or items' });
+  }
+
+  const result = await evaluatePicks(category, items);
+  return res.json(result);
+});
 
 // In-memory Room storage
 const rooms = new Map<string, Room>();
@@ -320,13 +409,33 @@ function startActiveDuel(room: Room) {
   }
 
   // Live 1-on-1 duel
+  currentDuel.aiDeliberating = true;
+  const duelId = currentDuel.id;
+  const pickA = room.submissions[currentDuel.playerAId] || 'Wild Pick';
+  const pickB = (currentDuel.playerBId && room.submissions[currentDuel.playerBId]) || 'Wild Pick';
+
+  // Request AI judge deliberation asynchronously
+  evaluatePicks(room.currentCategory || 'Power Battle', [
+    { label: 'Pick A', pick: pickA },
+    { label: 'Pick B', pick: pickB },
+  ]).then((res) => {
+    const cur = rooms.get(room.code);
+    if (!cur || !cur.bracket) return;
+    const d = cur.bracket.duelRounds[cur.bracket.activeRoundIndex]?.[cur.bracket.activeDuelIndex];
+    if (!d || d.id !== duelId) return;
+    d.aiVerdict = res.verdict;
+    d.aiWinnerLabel = res.ranking[0];
+    d.aiDeliberating = false;
+    broadcastRoom(cur);
+  });
+
   const eligibleSpectators = room.players.filter(
     (p) => p.connected && p.id !== currentDuel.playerAId && p.id !== currentDuel.playerBId
   );
 
   // If exactly 2 players in room (no spectators)
   if (eligibleSpectators.length === 0) {
-    const durationMs = 3800; // Scouter power level reading animation
+    const durationMs = 4200; // Scouter reading & AI judge deliberation
     currentDuel.deadline = Date.now() + durationMs;
     broadcastRoom(room);
 
@@ -400,7 +509,7 @@ function checkAllDuelVoted(room: Room) {
   }
 }
 
-// Resolve current duel (calculate winner, broadcast clash, then queue advance)
+// Resolve current duel using the authoritative AI Judge
 function resolveCurrentDuel(room: Room) {
   clearRoomTimer(room.code);
   if (!room.bracket) return;
@@ -410,50 +519,53 @@ function resolveCurrentDuel(room: Room) {
   const currentDuel = currentRoundDuels[room.bracket.activeDuelIndex];
   if (!currentDuel || currentDuel.winnerId !== null) return;
 
-  const eligibleSpectators = room.players.filter(
-    (p) => p.connected && p.id !== currentDuel.playerAId && p.id !== currentDuel.playerBId
-  );
-
-  if (eligibleSpectators.length === 0) {
-    // 2-player direct power level comparison
-    currentDuel.resolvedReason = 'powerlevel';
-    if (currentDuel.powerLevelA >= currentDuel.powerLevelB) {
-      currentDuel.winnerId = currentDuel.playerAId;
-    } else {
-      currentDuel.winnerId = currentDuel.playerBId!;
-    }
+  // Determine winner via authoritative AI Judge
+  let winnerId = currentDuel.playerAId;
+  if (currentDuel.aiWinnerLabel === 'Pick B' && currentDuel.playerBId) {
+    winnerId = currentDuel.playerBId;
+  } else if (currentDuel.aiWinnerLabel === 'Pick A') {
+    winnerId = currentDuel.playerAId;
   } else {
-    // Spectator vote tally
-    let votesA = 0;
-    let votesB = 0;
-    for (const targetId of Object.values(currentDuel.spectatorVotes)) {
-      if (targetId === currentDuel.playerAId) votesA++;
-      else if (targetId === currentDuel.playerBId) votesB++;
-    }
+    // If AI evaluation was still pending, compute instant fallback
+    const pickA = room.submissions[currentDuel.playerAId] || 'Wild Pick';
+    const pickB = (currentDuel.playerBId && room.submissions[currentDuel.playerBId]) || 'Wild Pick';
+    const judged = fallbackJudge(room.currentCategory || 'Power Battle', [
+      { label: 'Pick A', pick: pickA },
+      { label: 'Pick B', pick: pickB },
+    ]);
+    currentDuel.aiVerdict = judged.verdict;
+    currentDuel.aiWinnerLabel = judged.ranking[0];
+    winnerId =
+      judged.ranking[0] === 'Pick B' && currentDuel.playerBId
+        ? currentDuel.playerBId
+        : currentDuel.playerAId;
+  }
 
-    if (votesA > votesB) {
-      currentDuel.winnerId = currentDuel.playerAId;
-      currentDuel.resolvedReason = 'vote';
-    } else if (votesB > votesA) {
-      currentDuel.winnerId = currentDuel.playerBId!;
-      currentDuel.resolvedReason = 'vote';
-    } else {
-      // Tiebreak - Sudden Death
-      currentDuel.winnerId = Math.random() < 0.5 ? currentDuel.playerAId : currentDuel.playerBId!;
-      currentDuel.resolvedReason = 'tiebreak';
+  currentDuel.winnerId = winnerId;
+  currentDuel.resolvedReason = 'ai_judge';
+  currentDuel.aiDeliberating = false;
+
+  // Boost winner's Scouter Power Level visually to validate victory
+  if (winnerId === currentDuel.playerAId) {
+    if (currentDuel.powerLevelA <= currentDuel.powerLevelB) {
+      currentDuel.powerLevelA = Math.max(currentDuel.powerLevelB + 300000, 4000000);
+    }
+  } else if (currentDuel.playerBId && winnerId === currentDuel.playerBId) {
+    if (currentDuel.powerLevelB <= currentDuel.powerLevelA) {
+      currentDuel.powerLevelB = Math.max(currentDuel.powerLevelA + 300000, 4000000);
     }
   }
 
-  // Broadcast resolution for clash and KO animations
+  // Broadcast resolution for clash, KO animations, and AI verdict display
   broadcastRoom(room);
 
-  // Pause ~3.2s so all clients see the KO burst & victory celebration before advancing
+  // Pause ~3.8s so all clients can read the AI Judge's punchy verdict before advancing
   const timer = setTimeout(() => {
     const cur = rooms.get(room.code);
     if (cur && cur.status === 'battle' && cur.bracket) {
       advanceDuel(cur);
     }
-  }, 3200);
+  }, 3800);
   roomTimers.set(room.code, timer);
 }
 
@@ -650,6 +762,16 @@ function transitionToReveal(room: Room) {
     player.score += pts;
   }
 
+  // Find final championship duel AI verdict
+  let clashVerdict: string | undefined;
+  if (room.bracket && room.bracket.duelRounds.length > 0) {
+    const lastRound = room.bracket.duelRounds[room.bracket.duelRounds.length - 1];
+    const finalDuel = lastRound && lastRound[lastRound.length - 1];
+    if (finalDuel?.aiVerdict) {
+      clashVerdict = finalDuel.aiVerdict;
+    }
+  }
+
   const roundResult: RoundResult = {
     roundNumber: room.currentRoundNumber,
     category: room.currentCategory || 'Wildcard',
@@ -660,6 +782,7 @@ function transitionToReveal(room: Room) {
     pointsAwarded,
     flavorLine,
     bracketSummary: room.bracket ? JSON.parse(JSON.stringify(room.bracket)) : undefined,
+    aiVerdict: clashVerdict,
   };
 
   room.roundHistory.push(roundResult);

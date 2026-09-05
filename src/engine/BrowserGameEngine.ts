@@ -10,6 +10,7 @@ import {
   VotingStartedPayload,
 } from '../types';
 import { CATEGORIES, FLAVOR_LINES, BOT_NAMES, sanitizeText } from '../utils/gameData';
+import { judgePicks, fallbackJudge } from '../utils/aiJudge';
 
 export interface NetworkConnection {
   id: string; // unique socket/peer id
@@ -609,9 +610,32 @@ export class BrowserGameEngine {
       (p) => p.connected && p.id !== currentDuel.playerAId && p.id !== currentDuel.playerBId
     );
 
+    // AI Judge Deliberation (asynchronous with instant fallback)
+    currentDuel.aiDeliberating = true;
+    const duelId = currentDuel.id;
+    const pickA = this.room.submissions[currentDuel.playerAId] || 'Wild Pick';
+    const pickB = (currentDuel.playerBId && this.room.submissions[currentDuel.playerBId]) || 'Wild Pick';
+
+    judgePicks(this.room.currentCategory || 'Power Battle', [
+      { label: 'Pick A', pick: pickA },
+      { label: 'Pick B', pick: pickB },
+    ]).then((res) => {
+      if (!this.room || !this.room.bracket) return;
+      const d =
+        this.room.bracket.duelRounds[this.room.bracket.activeRoundIndex]?.[
+          this.room.bracket.activeDuelIndex
+        ];
+      if (!d || d.id !== duelId) return;
+
+      d.aiVerdict = res.verdict;
+      d.aiWinnerLabel = res.ranking[0];
+      d.aiDeliberating = false;
+      this.broadcastState();
+    });
+
     // If 2-player direct duel
     if (eligibleSpectators.length === 0) {
-      const durationMs = 3800;
+      const durationMs = 4200;
       currentDuel.deadline = Date.now() + durationMs;
       this.broadcastState();
 
@@ -711,34 +735,41 @@ export class BrowserGameEngine {
     const currentDuel = currentRoundDuels[this.room.bracket.activeDuelIndex];
     if (!currentDuel || currentDuel.winnerId !== null) return;
 
-    const eligibleSpectators = this.room.players.filter(
-      (p) => p.connected && p.id !== currentDuel.playerAId && p.id !== currentDuel.playerBId
-    );
-
-    if (eligibleSpectators.length === 0) {
-      currentDuel.resolvedReason = 'powerlevel';
-      if (currentDuel.powerLevelA >= currentDuel.powerLevelB) {
-        currentDuel.winnerId = currentDuel.playerAId;
-      } else {
-        currentDuel.winnerId = currentDuel.playerBId!;
-      }
+    // Determine winner via authoritative AI Judge
+    let winnerId = currentDuel.playerAId;
+    if (currentDuel.aiWinnerLabel === 'Pick B' && currentDuel.playerBId) {
+      winnerId = currentDuel.playerBId;
+    } else if (currentDuel.aiWinnerLabel === 'Pick A') {
+      winnerId = currentDuel.playerAId;
     } else {
-      let votesA = 0;
-      let votesB = 0;
-      for (const targetId of Object.values(currentDuel.spectatorVotes)) {
-        if (targetId === currentDuel.playerAId) votesA++;
-        else if (targetId === currentDuel.playerBId) votesB++;
-      }
+      // If AI evaluation was still pending, compute instant fallback
+      const pickA = this.room.submissions[currentDuel.playerAId] || 'Wild Pick';
+      const pickB =
+        (currentDuel.playerBId && this.room.submissions[currentDuel.playerBId]) || 'Wild Pick';
+      const judged = fallbackJudge(this.room.currentCategory || 'Power Battle', [
+        { label: 'Pick A', pick: pickA },
+        { label: 'Pick B', pick: pickB },
+      ]);
+      currentDuel.aiVerdict = judged.verdict;
+      currentDuel.aiWinnerLabel = judged.ranking[0];
+      winnerId =
+        judged.ranking[0] === 'Pick B' && currentDuel.playerBId
+          ? currentDuel.playerBId
+          : currentDuel.playerAId;
+    }
 
-      if (votesA > votesB) {
-        currentDuel.winnerId = currentDuel.playerAId;
-        currentDuel.resolvedReason = 'vote';
-      } else if (votesB > votesA) {
-        currentDuel.winnerId = currentDuel.playerBId!;
-        currentDuel.resolvedReason = 'vote';
-      } else {
-        currentDuel.winnerId = Math.random() < 0.5 ? currentDuel.playerAId : currentDuel.playerBId!;
-        currentDuel.resolvedReason = 'tiebreak';
+    currentDuel.winnerId = winnerId;
+    currentDuel.resolvedReason = 'ai_judge';
+    currentDuel.aiDeliberating = false;
+
+    // Boost winner's Scouter Power Level visually to reflect victory
+    if (winnerId === currentDuel.playerAId) {
+      if (currentDuel.powerLevelA <= currentDuel.powerLevelB) {
+        currentDuel.powerLevelA = Math.max(currentDuel.powerLevelB + 300000, 4000000);
+      }
+    } else if (currentDuel.playerBId && winnerId === currentDuel.playerBId) {
+      if (currentDuel.powerLevelB <= currentDuel.powerLevelA) {
+        currentDuel.powerLevelB = Math.max(currentDuel.powerLevelA + 300000, 4000000);
       }
     }
 
@@ -748,7 +779,7 @@ export class BrowserGameEngine {
       if (this.room && this.room.status === 'battle' && this.room.bracket) {
         this.advanceDuel();
       }
-    }, 3200);
+    }, 3800);
     this.timers.set('duel', timer);
   }
 
@@ -900,6 +931,16 @@ export class BrowserGameEngine {
       player.score += pts;
     }
 
+    // Find final championship duel AI verdict
+    let clashVerdict: string | undefined;
+    if (this.room.bracket && this.room.bracket.duelRounds.length > 0) {
+      const lastRound = this.room.bracket.duelRounds[this.room.bracket.duelRounds.length - 1];
+      const finalDuel = lastRound && lastRound[lastRound.length - 1];
+      if (finalDuel?.aiVerdict) {
+        clashVerdict = finalDuel.aiVerdict;
+      }
+    }
+
     const roundResult: RoundResult = {
       roundNumber: this.room.currentRoundNumber,
       category: this.room.currentCategory || 'Wildcard',
@@ -910,6 +951,7 @@ export class BrowserGameEngine {
       pointsAwarded,
       flavorLine,
       bracketSummary: this.room.bracket ? JSON.parse(JSON.stringify(this.room.bracket)) : undefined,
+      aiVerdict: clashVerdict,
     };
 
     this.room.roundHistory.push(roundResult);

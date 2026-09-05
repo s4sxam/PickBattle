@@ -28,7 +28,10 @@ export interface Duel {
   spectatorVotes: Record<string, string>; // voterId -> playerId they voted for
   winnerId: string | null;
   deadline: number | null;
-  resolvedReason?: 'vote' | 'tiebreak' | 'powerlevel' | 'bye' | 'forfeit';
+  resolvedReason?: 'ai_judge' | 'vote' | 'tiebreak' | 'powerlevel' | 'bye' | 'forfeit';
+  aiVerdict?: string;
+  aiWinnerLabel?: string;
+  aiDeliberating?: boolean;
 }
 
 export interface Bracket {
@@ -60,6 +63,7 @@ export interface RoundResult {
   pointsAwarded: Record<string, number>;
   flavorLine: string;
   bracketSummary?: Bracket;
+  aiVerdict?: string;
 }
 
 export type RoomStatus =

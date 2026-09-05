@@ -116,6 +116,25 @@ export const RevealPhase: React.FC<RevealPhaseProps> = ({ room, me, onNext }) =>
         </motion.div>
       )}
 
+      {/* Official AI Judge Verdict Banner */}
+      {currentResult.aiVerdict && (
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-purple-950/70 via-slate-900 to-indigo-950/70 border border-purple-500/40 shadow-xl mb-6 text-left"
+        >
+          <div className="flex items-center gap-2 mb-1.5">
+            <span className="px-2.5 py-0.5 rounded-full bg-purple-500/20 border border-purple-400/40 text-purple-300 text-[11px] font-black tracking-wider uppercase flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+              AI Judge Final Ruling
+            </span>
+          </div>
+          <p className="text-sm sm:text-base font-bold text-white leading-relaxed">
+            &ldquo;{currentResult.aiVerdict}&rdquo;
+          </p>
+        </motion.div>
+      )}
+
       {/* Results Header */}
       <div className="text-left mb-3">
         <h4 className="text-xs font-black uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
