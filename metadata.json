@@ -1,0 +1,6 @@
+{
+  "name": "PickBattle",
+  "description": "A multiplayer friend comparison party game where players submit their best picks in fun categories and vote on the winner.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
