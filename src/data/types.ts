@@ -14,4 +14,6 @@ export interface ContenderDossier {
   badges: ContenderStatBadge[];
   headlineFeat: string; // Key feat, review, or spec summary
   verdictSnippet: string; // Punchy rationale why it wins
+  isDisqualified?: boolean;
+  disqualificationReason?: string;
 }

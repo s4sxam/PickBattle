@@ -13,10 +13,18 @@ import {
   GameMode,
   VotingCardOption,
   VotingStartedPayload,
+  ChatMessage,
+  VoicePeerState,
+  WebRTCSignalPayload,
+  UserProfile,
+  LeaderboardEntry,
 } from './src/types';
+
 import { CATEGORIES, FLAVOR_LINES, BOT_NAMES, sanitizeText } from './src/utils/gameData';
 import { GoogleGenAI } from '@google/genai';
 import { fallbackJudge } from './src/utils/aiJudge';
+import { checkDuplicateCharacterInMatch, getUsedAnimeCharactersForPlayer } from './src/utils/animeRules';
+import { checkEqualizedMatchup } from './src/utils/matchupEqualizer';
 
 const app = express();
 const httpServer = http.createServer(app);
@@ -57,7 +65,7 @@ Use the exact pick labels given to you (e.g. "Pick A", "Pick B") in the ranking 
 
 let aiClient: GoogleGenAI | null = null;
 function getGenAI(): GoogleGenAI | null {
-  const key = process.env.GEMINI_API_KEY1 || process.env.GEMINI_API_KEY;
+  const key = process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEY1;
   if (!key) return null;
   if (!aiClient) {
     aiClient = new GoogleGenAI({
@@ -73,12 +81,24 @@ function getGenAI(): GoogleGenAI | null {
 }
 
 // Server-side pick evaluator using Gemini with silent fallback
-async function evaluatePicks(category: string, items: { label: string; pick: string }[]) {
+async function evaluatePicks(
+  category: string,
+  items: { label: string; pick: string }[],
+  equalizedMatchup?: any
+) {
   const ai = getGenAI();
   if (ai) {
     try {
       const picksDescription = items.map((it) => `${it.label}: ${it.pick}`).join('\n');
-      const userContent = `Category: ${category}\n\nPicks to judge:\n${picksDescription}`;
+      let userContent = `Category: ${category}\n\nPicks to judge:\n${picksDescription}`;
+
+      if (equalizedMatchup && equalizedMatchup.isEqualized) {
+        userContent += `\n\n⚡ SPECIAL BATTLE HANDICAP - ARENA POWER EQUALIZER ACTIVE:
+Tier Disparity Detected: ${equalizedMatchup.tierGap}
+- LIMITATION TASK for ${equalizedMatchup.overpoweredContender}: ${equalizedMatchup.limitationTask}
+- TACTICAL BUFF for ${equalizedMatchup.underdogContender}: ${equalizedMatchup.underdogAdvantage}
+Judging Instruction for this duel: All cosmic reality-warping, planet-destroying beams, and omnipotence are strictly sealed. The combatants are scaled to human combat thresholds. Judge based strictly on martial arts technique, tactical ingenuity, combat IQ, and performance under these limitations!`;
+      }
 
       const response = await ai.models.generateContent({
         model: 'gemini-3.8-flash',
@@ -105,19 +125,114 @@ async function evaluatePicks(category: string, items: { label: string; pick: str
     }
   }
 
-  return fallbackJudge(category, items);
+  return fallbackJudge(category, items, equalizedMatchup);
+}
+
+// In-memory Global Leaderboard store (Top 100)
+const globalLeaderboardMap = new Map<string, UserProfile>();
+
+function getRankTitle(score: number): string {
+  if (score >= 8000) return 'Mythic Legend 🌟';
+  if (score >= 3500) return 'Grandmaster ⚡';
+  if (score >= 1500) return 'Master Strategist 👑';
+  if (score >= 600) return 'Arena Champion 🏆';
+  if (score >= 200) return 'Skilled Duelist ⚔️';
+  return 'Rookie Contender 🥉';
+}
+
+// Seed community top players so the leaderboard is vibrant and competitive
+const SEED_PLAYERS: Array<Partial<UserProfile>> = [
+  { username: 'GokuSensei', avatarEmoji: '🔥', totalScore: 12450, gamesPlayed: 84, matchesWon: 62, roundWins: 148, trophies: 38 },
+  { username: 'ShadowMonarch', avatarEmoji: '👑', totalScore: 9820, gamesPlayed: 71, matchesWon: 51, roundWins: 119, trophies: 29 },
+  { username: 'ValkyrieNova', avatarEmoji: '⚡', totalScore: 8450, gamesPlayed: 65, matchesWon: 45, roundWins: 104, trophies: 25 },
+  { username: 'LuffyGear5', avatarEmoji: '🏴‍☠️', totalScore: 7150, gamesPlayed: 58, matchesWon: 39, roundWins: 92, trophies: 21 },
+  { username: 'CyberRonin', avatarEmoji: '⚔️', totalScore: 6320, gamesPlayed: 52, matchesWon: 34, roundWins: 80, trophies: 18 },
+  { username: 'OmniJudge', avatarEmoji: '🤖', totalScore: 5490, gamesPlayed: 46, matchesWon: 29, roundWins: 67, trophies: 15 },
+  { username: 'SaitamaOnePunch', avatarEmoji: '🥊', totalScore: 4890, gamesPlayed: 40, matchesWon: 28, roundWins: 62, trophies: 14 },
+  { username: 'NeonPhoenix', avatarEmoji: '🦅', totalScore: 4120, gamesPlayed: 36, matchesWon: 23, roundWins: 55, trophies: 11 },
+  { username: 'FrostBite', avatarEmoji: '❄️', totalScore: 3650, gamesPlayed: 33, matchesWon: 20, roundWins: 49, trophies: 10 },
+  { username: 'SpeedDemon', avatarEmoji: '🏎️', totalScore: 3100, gamesPlayed: 30, matchesWon: 18, roundWins: 42, trophies: 8 },
+  { username: 'AizenMastermind', avatarEmoji: '🎭', totalScore: 2680, gamesPlayed: 27, matchesWon: 16, roundWins: 38, trophies: 7 },
+  { username: 'ApexPredator', avatarEmoji: '🦁', totalScore: 2240, gamesPlayed: 24, matchesWon: 14, roundWins: 33, trophies: 6 },
+  { username: 'Zenith', avatarEmoji: '✨', totalScore: 1890, gamesPlayed: 21, matchesWon: 12, roundWins: 29, trophies: 5 },
+  { username: 'ThunderGod', avatarEmoji: '⚡', totalScore: 1540, gamesPlayed: 19, matchesWon: 10, roundWins: 24, trophies: 4 },
+  { username: 'BlazeKitsune', avatarEmoji: '🦊', totalScore: 1220, gamesPlayed: 16, matchesWon: 8, roundWins: 19, trophies: 3 },
+  { username: 'IronLotus', avatarEmoji: '🌸', totalScore: 980, gamesPlayed: 14, matchesWon: 6, roundWins: 16, trophies: 2 },
+  { username: 'VortexPilot', avatarEmoji: '🚀', totalScore: 760, gamesPlayed: 11, matchesWon: 5, roundWins: 12, trophies: 2 },
+  { username: 'RoguePixel', avatarEmoji: '👾', totalScore: 540, gamesPlayed: 9, matchesWon: 3, roundWins: 9, trophies: 1 },
+  { username: 'CrimsonNinja', avatarEmoji: '🥷', totalScore: 380, gamesPlayed: 7, matchesWon: 2, roundWins: 6, trophies: 1 },
+  { username: 'StarGazer', avatarEmoji: '🔮', totalScore: 220, gamesPlayed: 5, matchesWon: 1, roundWins: 4, trophies: 0 },
+];
+
+SEED_PLAYERS.forEach((seed, index) => {
+  const id = `seed_player_${index + 1}`;
+  globalLeaderboardMap.set(id, {
+    id,
+    username: seed.username!,
+    avatarEmoji: seed.avatarEmoji || '🎮',
+    totalScore: seed.totalScore || 0,
+    gamesPlayed: seed.gamesPlayed || 0,
+    matchesWon: seed.matchesWon || 0,
+    roundWins: seed.roundWins || 0,
+    trophies: seed.trophies || 0,
+    winStreak: Math.floor(Math.random() * 4),
+    bestStreak: Math.floor(Math.random() * 6) + 1,
+    lastPlayed: Date.now() - Math.floor(Math.random() * 86400000 * 3),
+    createdAt: Date.now() - 86400000 * 14,
+  });
+});
+
+function getTop100Leaderboard(): LeaderboardEntry[] {
+  const all = Array.from(globalLeaderboardMap.values());
+  // Sort by totalScore descending, then by trophies descending, then matchesWon
+  all.sort((a, b) => {
+    if (b.totalScore !== a.totalScore) return b.totalScore - a.totalScore;
+    if (b.trophies !== a.trophies) return b.trophies - a.trophies;
+    return b.matchesWon - a.matchesWon;
+  });
+
+  // Take top 100 players only
+  const top100 = all.slice(0, 100);
+  return top100.map((p, idx) => {
+    const winRate = p.gamesPlayed > 0 ? Math.round((p.matchesWon / p.gamesPlayed) * 100) : 0;
+    return {
+      rank: idx + 1,
+      id: p.id,
+      username: p.username,
+      avatarEmoji: p.avatarEmoji,
+      totalScore: p.totalScore,
+      gamesPlayed: p.gamesPlayed,
+      matchesWon: p.matchesWon,
+      roundWins: p.roundWins,
+      trophies: p.trophies,
+      winRate,
+      title: getRankTitle(p.totalScore),
+      lastActive: p.lastPlayed,
+    };
+  });
 }
 
 // Public API endpoint for AI Judge evaluation
 app.post('/api/ai-judge', async (req, res) => {
-  const { category, items } = req.body || {};
+  const { category, items, equalizedMatchup } = req.body || {};
   if (!category || !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: 'Invalid category or items' });
   }
 
-  const result = await evaluatePicks(category, items);
+  const result = await evaluatePicks(category, items, equalizedMatchup);
   return res.json(result);
 });
+
+// REST API endpoint for Global Top 100 Leaderboard
+app.get('/api/leaderboard', (req, res) => {
+  const top100 = getTop100Leaderboard();
+  return res.json({
+    top100,
+    totalPlayers: globalLeaderboardMap.size,
+    updatedAt: Date.now(),
+  });
+});
+
 
 // In-memory Room storage
 const rooms = new Map<string, Room>();
@@ -190,7 +305,7 @@ function shuffleArray<T>(array: T[]): T[] {
 
 // Bot auto-play helper for submissions
 function handleBotSubmissions(room: Room) {
-  const bots = room.players.filter((p) => p.isBot && p.connected);
+  const bots = room.players.filter((p) => p.isBot && p.connected && !p.isSpectator);
   if (bots.length === 0) return;
 
   const currentCat = CATEGORIES.find((c) => c.name === room.currentCategory) || CATEGORIES[0];
@@ -202,8 +317,17 @@ function handleBotSubmissions(room: Room) {
       if (!currentRoom || currentRoom.status !== 'submitting') return;
       if (currentRoom.submissions[bot.id]) return;
 
+      // Filter out characters already deployed by this bot in earlier rounds of this match
+      const usedByBot = getUsedAnimeCharactersForPlayer(currentRoom, bot.id).map((r) =>
+        r.characterName.toLowerCase()
+      );
+      const availablePicks = currentCat.botPicks.filter(
+        (p) => !usedByBot.some((u) => p.toLowerCase().includes(u) || u.includes(p.toLowerCase()))
+      );
+      const pool = availablePicks.length > 0 ? availablePicks : currentCat.botPicks;
+
       const randomPick =
-        currentCat.botPicks[Math.floor(Math.random() * currentCat.botPicks.length)] ||
+        pool[Math.floor(Math.random() * pool.length)] ||
         `${currentCat.name} Champion`;
 
       currentRoom.submissions[bot.id] = randomPick;
@@ -215,7 +339,7 @@ function handleBotSubmissions(room: Room) {
 
 // Bot auto-play helper for crowd vote mode
 function handleBotVotes(room: Room) {
-  const bots = room.players.filter((p) => p.isBot && p.connected);
+  const bots = room.players.filter((p) => p.isBot && p.connected && !p.isSpectator);
   if (bots.length === 0) return;
 
   const validTargets = Object.keys(room.submissions);
@@ -241,6 +365,7 @@ function handleBotVotes(room: Room) {
 
 // Send anonymous randomized voting options to a specific player socket
 function sendVotingOptionsToPlayer(socket: Socket, room: Room, player: Player) {
+  if (player.isSpectator) return;
   const allSubmissions: { playerId: string; pick: string }[] = Object.entries(room.submissions).map(
     ([playerId, pick]) => ({ playerId, pick })
   );
@@ -271,7 +396,7 @@ function transitionToVoting(room: Room) {
   const durationMs = 22000;
   room.votingDeadline = Date.now() + durationMs;
 
-  const activePlayers = room.players.filter((p) => p.connected);
+  const activePlayers = room.players.filter((p) => p.connected && !p.isSpectator);
   for (const p of activePlayers) {
     if (!room.submissions[p.id]) {
       room.submissions[p.id] = `${p.name}'s Mystery Pick`;
@@ -287,7 +412,7 @@ function transitionToVoting(room: Room) {
       const socket = io.sockets.sockets.get(socketId);
       if (!socket) continue;
       const socketPlayer = room.players.find((p) => p.socketId === socketId);
-      if (!socketPlayer) continue;
+      if (!socketPlayer || socketPlayer.isSpectator) continue;
 
       sendVotingOptionsToPlayer(socket, room, socketPlayer);
     }
@@ -307,7 +432,7 @@ function transitionToVoting(room: Room) {
 
 // Check if all connected players voted in Vote Mode
 function checkAllVoted(room: Room) {
-  const activePlayers = room.players.filter((p) => p.connected);
+  const activePlayers = room.players.filter((p) => p.connected && !p.isSpectator);
   if (activePlayers.length === 0) return;
   const allVoted = activePlayers.every((p) => Boolean(room.votes[p.id]));
   if (allVoted) {
@@ -351,7 +476,7 @@ function transitionToBattle(room: Room) {
   clearRoomTimer(room.code);
   room.status = 'battle';
 
-  const activePlayers = room.players.filter((p) => p.connected);
+  const activePlayers = room.players.filter((p) => p.connected && !p.isSpectator);
   // Ensure every active player has a submission entry
   for (const p of activePlayers) {
     if (!room.submissions[p.id]) {
@@ -359,7 +484,7 @@ function transitionToBattle(room: Room) {
     }
   }
 
-  const submittedPlayerIds = Object.keys(room.submissions);
+  const submittedPlayerIds = activePlayers.map((p) => p.id);
   const shuffledIds = shuffleArray(submittedPlayerIds);
 
   const initialDuels = createRoundDuels(shuffledIds, 1);
@@ -409,16 +534,41 @@ function startActiveDuel(room: Room) {
   }
 
   // Live 1-on-1 duel
-  currentDuel.aiDeliberating = true;
-  const duelId = currentDuel.id;
   const pickA = room.submissions[currentDuel.playerAId] || 'Wild Pick';
   const pickB = (currentDuel.playerBId && room.submissions[currentDuel.playerBId]) || 'Wild Pick';
 
+  // Compute Arena Equalization for unfair matchups (Universe tier vs Earth tier)
+  if (currentDuel.playerBId) {
+    const equalized = checkEqualizedMatchup(room.currentCategory, pickA, pickB);
+    if (equalized) {
+      currentDuel.equalizedMatchup = {
+        ...equalized,
+        overpoweredPlayerId:
+          equalized.overpoweredContender.toLowerCase() === pickA.toLowerCase()
+            ? currentDuel.playerAId
+            : currentDuel.playerBId,
+        underdogPlayerId:
+          equalized.underdogContender.toLowerCase() === pickA.toLowerCase()
+            ? currentDuel.playerAId
+            : currentDuel.playerBId,
+      };
+      currentDuel.powerLevelA = equalized.equalizedPowerA;
+      currentDuel.powerLevelB = equalized.equalizedPowerB;
+    }
+  }
+
+  currentDuel.aiDeliberating = true;
+  const duelId = currentDuel.id;
+
   // Request AI judge deliberation asynchronously
-  evaluatePicks(room.currentCategory || 'Power Battle', [
-    { label: 'Pick A', pick: pickA },
-    { label: 'Pick B', pick: pickB },
-  ]).then((res) => {
+  evaluatePicks(
+    room.currentCategory || 'Power Battle',
+    [
+      { label: 'Pick A', pick: pickA },
+      { label: 'Pick B', pick: pickB },
+    ],
+    currentDuel.equalizedMatchup
+  ).then((res) => {
     const cur = rooms.get(room.code);
     if (!cur || !cur.bracket) return;
     const d = cur.bracket.duelRounds[cur.bracket.activeRoundIndex]?.[cur.bracket.activeDuelIndex];
@@ -491,7 +641,11 @@ function checkAllDuelVoted(room: Room) {
   if (!currentDuel || currentDuel.winnerId !== null) return;
 
   const eligibleSpectators = room.players.filter(
-    (p) => p.connected && p.id !== currentDuel.playerAId && p.id !== currentDuel.playerBId
+    (p) =>
+      p.connected &&
+      !p.isSpectator &&
+      p.id !== currentDuel.playerAId &&
+      p.id !== currentDuel.playerBId
   );
 
   if (
@@ -529,10 +683,14 @@ function resolveCurrentDuel(room: Room) {
     // If AI evaluation was still pending, compute instant fallback
     const pickA = room.submissions[currentDuel.playerAId] || 'Wild Pick';
     const pickB = (currentDuel.playerBId && room.submissions[currentDuel.playerBId]) || 'Wild Pick';
-    const judged = fallbackJudge(room.currentCategory || 'Power Battle', [
-      { label: 'Pick A', pick: pickA },
-      { label: 'Pick B', pick: pickB },
-    ]);
+    const judged = fallbackJudge(
+      room.currentCategory || 'Power Battle',
+      [
+        { label: 'Pick A', pick: pickA },
+        { label: 'Pick B', pick: pickB },
+      ],
+      currentDuel.equalizedMatchup
+    );
     currentDuel.aiVerdict = judged.verdict;
     currentDuel.aiWinnerLabel = judged.ranking[0];
     winnerId =
@@ -542,17 +700,27 @@ function resolveCurrentDuel(room: Room) {
   }
 
   currentDuel.winnerId = winnerId;
-  currentDuel.resolvedReason = 'ai_judge';
+  currentDuel.resolvedReason = currentDuel.equalizedMatchup?.isEqualized
+    ? 'equalized_clash'
+    : 'ai_judge';
   currentDuel.aiDeliberating = false;
 
   // Boost winner's Scouter Power Level visually to validate victory
-  if (winnerId === currentDuel.playerAId) {
-    if (currentDuel.powerLevelA <= currentDuel.powerLevelB) {
-      currentDuel.powerLevelA = Math.max(currentDuel.powerLevelB + 300000, 4000000);
+  if (currentDuel.equalizedMatchup?.isEqualized) {
+    if (winnerId === currentDuel.playerAId && currentDuel.powerLevelA <= currentDuel.powerLevelB) {
+      currentDuel.powerLevelA = currentDuel.powerLevelB + 15000;
+    } else if (currentDuel.playerBId && winnerId === currentDuel.playerBId && currentDuel.powerLevelB <= currentDuel.powerLevelA) {
+      currentDuel.powerLevelB = currentDuel.powerLevelA + 15000;
     }
-  } else if (currentDuel.playerBId && winnerId === currentDuel.playerBId) {
-    if (currentDuel.powerLevelB <= currentDuel.powerLevelA) {
-      currentDuel.powerLevelB = Math.max(currentDuel.powerLevelA + 300000, 4000000);
+  } else {
+    if (winnerId === currentDuel.playerAId) {
+      if (currentDuel.powerLevelA <= currentDuel.powerLevelB) {
+        currentDuel.powerLevelA = Math.max(currentDuel.powerLevelB + 300000, 4000000);
+      }
+    } else if (currentDuel.playerBId && winnerId === currentDuel.playerBId) {
+      if (currentDuel.powerLevelB <= currentDuel.powerLevelA) {
+        currentDuel.powerLevelB = Math.max(currentDuel.powerLevelA + 300000, 4000000);
+      }
     }
   }
 
@@ -602,7 +770,7 @@ function advanceDuel(room: Room) {
 
 // Check if all connected players submitted picks
 function checkAllSubmitted(room: Room) {
-  const activePlayers = room.players.filter((p) => p.connected);
+  const activePlayers = room.players.filter((p) => p.connected && !p.isSpectator);
   if (activePlayers.length === 0) return;
   const allIn = activePlayers.every((p) => Boolean(room.submissions[p.id]));
   if (allIn) {
@@ -838,6 +1006,7 @@ io.on('connection', (socket: Socket) => {
       currentRoundNumber: 0,
       totalRounds: 6,
       currentCategory: null,
+      category: null,
       submissions: {},
       bracket: null,
       votes: {},
@@ -897,6 +1066,9 @@ io.on('connection', (socket: Socket) => {
         return;
       }
 
+      const isOngoingMatch = room.status !== 'lobby';
+      const isSpectator = isOngoingMatch || Boolean((payload as any)?.isSpectator);
+
       const newPlayerId = generateId();
       const newPlayer: Player = {
         id: newPlayerId,
@@ -906,6 +1078,7 @@ io.on('connection', (socket: Socket) => {
         score: 0,
         isHost: room.players.length === 0,
         connected: true,
+        isSpectator,
       };
 
       if (newPlayer.isHost) {
@@ -915,7 +1088,7 @@ io.on('connection', (socket: Socket) => {
       room.players.push(newPlayer);
       socket.join(code);
 
-      if (callback) callback({ success: true, roomCode: code, playerId: newPlayerId });
+      if (callback) callback({ success: true, roomCode: code, playerId: newPlayerId, isSpectator });
       broadcastRoom(room);
     }
   );
@@ -949,6 +1122,202 @@ io.on('connection', (socket: Socket) => {
     room.players = room.players.filter((p) => p.id !== payload.botId);
     broadcastRoom(room);
   });
+
+  // --- In-Game Text Chat Handlers ---
+  socket.on('chat:send', (payload: { code: string; text: string }) => {
+    const room = rooms.get(payload?.code);
+    if (!room) return;
+
+    const sender = room.players.find((p) => p.socketId === socket.id);
+    if (!sender) return;
+
+    const { clean: text, isValid } = sanitizeText(payload.text || '', 200);
+    if (!isValid || !text.trim()) return;
+
+    const message: ChatMessage = {
+      id: generateId(),
+      senderId: sender.id,
+      senderName: sender.name,
+      senderAvatar: sender.avatarEmoji,
+      text: text.trim(),
+      timestamp: Date.now(),
+    };
+
+    if (!room.messages) {
+      room.messages = [];
+    }
+    room.messages.push(message);
+    if (room.messages.length > 100) {
+      room.messages.shift(); // Keep last 100 messages
+    }
+
+    io.to(room.code).emit('chat:message', message);
+  });
+
+  // --- In-Game P2P WebRTC Voice Call Signaling Handlers ---
+  socket.on('voice:join', (payload: { code: string }) => {
+    const room = rooms.get(payload?.code);
+    if (!room) return;
+
+    const sender = room.players.find((p) => p.socketId === socket.id);
+    if (!sender) return;
+
+    if (!room.voiceStates) {
+      room.voiceStates = {};
+    }
+
+    room.voiceStates[sender.id] = {
+      playerId: sender.id,
+      isMuted: false,
+      isDeafened: false,
+      isSpeaking: false,
+      inVoiceCall: true,
+    };
+
+    // Notify other peers in the room that a new peer joined voice call
+    socket.to(room.code).emit('voice:peer_joined', {
+      playerId: sender.id,
+      player: sender,
+    });
+
+    // Send the list of existing active voice participants to the joining player
+    const activeVoicePeers = Object.values(room.voiceStates).filter(
+      (v) => v.inVoiceCall && v.playerId !== sender.id
+    );
+    socket.emit('voice:active_peers', { peers: activeVoicePeers });
+
+    broadcastRoom(room);
+  });
+
+  socket.on('voice:leave', (payload: { code: string }) => {
+    const room = rooms.get(payload?.code);
+    if (!room) return;
+
+    const sender = room.players.find((p) => p.socketId === socket.id);
+    if (!sender) return;
+
+    if (room.voiceStates && room.voiceStates[sender.id]) {
+      room.voiceStates[sender.id].inVoiceCall = false;
+      room.voiceStates[sender.id].isSpeaking = false;
+    }
+
+    socket.to(room.code).emit('voice:peer_left', { playerId: sender.id });
+    broadcastRoom(room);
+  });
+
+  socket.on(
+    'voice:update_state',
+    (payload: { code: string; isMuted?: boolean; isDeafened?: boolean; isSpeaking?: boolean }) => {
+      const room = rooms.get(payload?.code);
+      if (!room) return;
+
+      const sender = room.players.find((p) => p.socketId === socket.id);
+      if (!sender) return;
+
+      if (!room.voiceStates) {
+        room.voiceStates = {};
+      }
+
+      const currentState = room.voiceStates[sender.id] || {
+        playerId: sender.id,
+        isMuted: false,
+        isDeafened: false,
+        isSpeaking: false,
+        inVoiceCall: true,
+      };
+
+      if (typeof payload.isMuted === 'boolean') currentState.isMuted = payload.isMuted;
+      if (typeof payload.isDeafened === 'boolean') currentState.isDeafened = payload.isDeafened;
+      if (typeof payload.isSpeaking === 'boolean') currentState.isSpeaking = payload.isSpeaking;
+
+      room.voiceStates[sender.id] = currentState;
+
+      socket.to(room.code).emit('voice:peer_state', {
+        playerId: sender.id,
+        state: currentState,
+      });
+      broadcastRoom(room);
+    }
+  );
+
+  // Direct WebRTC SDP Offer / Answer / ICE Candidate exchange
+  socket.on(
+    'voice:signal',
+    (payload: {
+      code: string;
+      targetPlayerId: string;
+      signal: any;
+      type: 'offer' | 'answer' | 'ice-candidate';
+    }) => {
+      const room = rooms.get(payload?.code);
+      if (!room) return;
+
+      const sender = room.players.find((p) => p.socketId === socket.id);
+      if (!sender) return;
+
+      const targetPlayer = room.players.find((p) => p.id === payload.targetPlayerId);
+      if (targetPlayer && targetPlayer.socketId && targetPlayer.connected) {
+        io.to(targetPlayer.socketId).emit('voice:signal', {
+          fromPlayerId: sender.id,
+          signal: payload.signal,
+          type: payload.type,
+        });
+      }
+    }
+  );
+
+  // --- Global Top 100 Leaderboard Handlers ---
+  socket.on('leaderboard:get', () => {
+    const top100 = getTop100Leaderboard();
+    socket.emit('leaderboard:data', {
+      top100,
+      totalPlayers: globalLeaderboardMap.size,
+    });
+  });
+
+  socket.on('leaderboard:sync_profile', (profile: UserProfile) => {
+    if (!profile || !profile.id || !profile.username) return;
+    const { clean: cleanName, isValid } = sanitizeText(profile.username, 24);
+    if (!isValid || !cleanName.trim()) return;
+
+    const existing = globalLeaderboardMap.get(profile.id) || {
+      id: profile.id,
+      username: cleanName,
+      avatarEmoji: profile.avatarEmoji || '🎮',
+      totalScore: 0,
+      gamesPlayed: 0,
+      matchesWon: 0,
+      roundWins: 0,
+      trophies: 0,
+      winStreak: 0,
+      bestStreak: 0,
+      lastPlayed: Date.now(),
+      createdAt: Date.now(),
+    };
+
+    existing.username = cleanName;
+    if (profile.avatarEmoji) existing.avatarEmoji = profile.avatarEmoji;
+    existing.totalScore = Math.max(existing.totalScore, profile.totalScore || 0);
+    existing.gamesPlayed = Math.max(existing.gamesPlayed, profile.gamesPlayed || 0);
+    existing.matchesWon = Math.max(existing.matchesWon, profile.matchesWon || 0);
+    existing.roundWins = Math.max(existing.roundWins, profile.roundWins || 0);
+    existing.trophies = Math.max(existing.trophies, profile.trophies || 0);
+    existing.winStreak = Math.max(existing.winStreak, profile.winStreak || 0);
+    existing.bestStreak = Math.max(existing.bestStreak, profile.bestStreak || 0);
+    existing.lastPlayed = Date.now();
+
+    globalLeaderboardMap.set(profile.id, existing);
+
+    const top100 = getTop100Leaderboard();
+    // Return updated leaderboard to sender
+    socket.emit('leaderboard:data', {
+      top100,
+      totalPlayers: globalLeaderboardMap.size,
+      myRank: top100.find((e) => e.id === profile.id)?.rank || null,
+    });
+  });
+
+
 
   // Change Game Mode (Host only) - 'clash' or 'vote' (vote requires > 2 players)
   socket.on('gamemode:set', (payload: { code: string; mode: GameMode }) => {
@@ -1004,15 +1373,19 @@ io.on('connection', (socket: Socket) => {
     broadcastRoom(room);
   });
 
-  // Category Selected (Host only)
+  // Category Selected (Any player in the room can choose or roll random)
   socket.on('category:select', (payload: { code: string; category: string }) => {
     const room = rooms.get(payload?.code);
-    if (!room) return;
+    if (!room || room.status !== 'category-select') return;
 
     const sender = room.players.find((p) => p.socketId === socket.id);
-    if (!sender || !sender.isHost) return;
+    if (!sender) return;
 
-    room.currentCategory = payload.category;
+    const { clean: selectedCategory, isValid } = sanitizeText(payload.category || '', 40);
+    const finalCategory = isValid ? selectedCategory : 'Anime Characters';
+
+    room.currentCategory = finalCategory;
+    room.category = finalCategory;
     room.submissions = {};
     room.bracket = null;
     room.votes = {};
@@ -1046,10 +1419,26 @@ io.on('connection', (socket: Socket) => {
     if (!room || room.status !== 'submitting') return;
 
     const sender = room.players.find((p) => p.socketId === socket.id);
-    if (!sender) return;
+    if (!sender || sender.isSpectator) return;
 
     const { clean: pick, isValid } = sanitizeText(payload.pick || '', 60);
-    room.submissions[sender.id] = isValid ? pick : 'A Mystery Pick';
+    const candidatePick = isValid ? pick : 'A Mystery Pick';
+
+    // Duplicate anime character validation across this match
+    const dupCheck = checkDuplicateCharacterInMatch(
+      room,
+      sender.id,
+      candidatePick,
+      room.currentCategory
+    );
+    if (dupCheck.isDuplicate) {
+      socket.emit('error', {
+        message: `"${dupCheck.canonicalName}" was already used by you in Round ${dupCheck.matchedRound}! Each anime character can only be used once per match.`,
+      });
+      return;
+    }
+
+    room.submissions[sender.id] = candidatePick;
 
     broadcastRoom(room);
     checkAllSubmitted(room);
@@ -1061,7 +1450,7 @@ io.on('connection', (socket: Socket) => {
     if (!room || room.status !== 'voting') return;
 
     const sender = room.players.find((p) => p.socketId === socket.id);
-    if (!sender) return;
+    if (!sender || sender.isSpectator) return;
 
     // Cannot vote for self
     if (sender.id === payload.targetPlayerId) return;
@@ -1122,6 +1511,7 @@ io.on('connection', (socket: Socket) => {
         room.currentRoundNumber += 1;
         room.status = 'category-select';
         room.currentCategory = null;
+        room.category = null;
         room.submissions = {};
         room.bracket = null;
         room.votes = {};
@@ -1145,6 +1535,7 @@ io.on('connection', (socket: Socket) => {
     room.currentRoundNumber = 0;
     room.status = 'lobby';
     room.currentCategory = null;
+    room.category = null;
     room.submissions = {};
     room.bracket = null;
     room.votes = {};
@@ -1152,6 +1543,7 @@ io.on('connection', (socket: Socket) => {
     room.roundHistory = [];
     room.players.forEach((p) => {
       p.score = 0;
+      p.isSpectator = false;
     });
 
     broadcastRoom(room);

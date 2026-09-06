@@ -10,6 +10,8 @@ interface CreateRoomModalProps {
   onSubmit: (name: string, avatar: string) => void;
   isLoading: boolean;
   error?: string | null;
+  defaultName?: string;
+  defaultAvatar?: string;
 }
 
 export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
@@ -18,9 +20,17 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
   onSubmit,
   isLoading,
   error,
+  defaultName = '',
+  defaultAvatar = '👑',
 }) => {
-  const [name, setName] = useState('');
-  const [avatar, setAvatar] = useState('👑');
+  const [name, setName] = useState(defaultName);
+  const [avatar, setAvatar] = useState(defaultAvatar);
+
+  React.useEffect(() => {
+    if (defaultName) setName(defaultName);
+    if (defaultAvatar) setAvatar(defaultAvatar);
+  }, [defaultName, defaultAvatar, isOpen]);
+
 
   if (!isOpen) return null;
 

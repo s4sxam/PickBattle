@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import confetti from 'canvas-confetti';
-import { Crown, RotateCcw, Home, Sparkles } from 'lucide-react';
+import { Crown, RotateCcw, Home, Sparkles, Trophy } from 'lucide-react';
 import { motion } from 'motion/react';
 import { Room, Player } from '../types';
 import { playFanfare, playLockIn, playPop } from '../utils/sound';
@@ -10,6 +10,7 @@ interface FinalPodiumPhaseProps {
   me: Player;
   onPlayAgain: () => void;
   onNewGame: () => void;
+  onOpenLeaderboard?: () => void;
 }
 
 export const FinalPodiumPhase: React.FC<FinalPodiumPhaseProps> = ({
@@ -17,9 +18,11 @@ export const FinalPodiumPhase: React.FC<FinalPodiumPhaseProps> = ({
   me,
   onPlayAgain,
   onNewGame,
+  onOpenLeaderboard,
 }) => {
   const isHost = me.isHost;
   const sortedPlayers = [...room.players].sort((a, b) => b.score - a.score);
+
 
   const first = sortedPlayers[0];
   const second = sortedPlayers[1];
@@ -179,33 +182,49 @@ export const FinalPodiumPhase: React.FC<FinalPodiumPhaseProps> = ({
       </div>
 
       {/* Buttons */}
-      <div className="flex flex-col sm:flex-row items-center justify-center gap-3 w-full max-w-md mx-auto">
-        {isHost && (
+      <div className="flex flex-col items-center justify-center gap-3 w-full max-w-md mx-auto">
+        {onOpenLeaderboard && (
           <button
-            id="final-play-again-btn"
             onClick={() => {
-              playLockIn();
-              onPlayAgain();
+              playPop();
+              onOpenLeaderboard();
             }}
-            className="w-full sm:w-1/2 py-3.5 px-5 rounded-2xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-display font-bold text-base shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2 transition-transform active:scale-95 cursor-pointer"
+            className="w-full py-3 px-5 rounded-2xl bg-slate-900 hover:bg-slate-850 border border-amber-500/40 text-amber-300 font-bold text-sm shadow-md flex items-center justify-center gap-2 transition-all cursor-pointer"
           >
-            <RotateCcw className="w-4 h-4" />
-            <span>Play Again</span>
+            <Trophy className="w-4 h-4 text-amber-400" />
+            <span>View Global Top 100 Leaderboard</span>
           </button>
         )}
 
-        <button
-          id="final-new-game-btn"
-          onClick={() => {
-            playPop();
-            onNewGame();
-          }}
-          className="w-full sm:w-1/2 py-3.5 px-5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-white font-display font-bold text-base border border-slate-700 shadow-md flex items-center justify-center gap-2 transition-transform active:scale-95 cursor-pointer"
-        >
-          <Home className="w-4 h-4" />
-          <span>Leave to Home</span>
-        </button>
+        <div className="flex flex-col sm:flex-row items-center gap-3 w-full">
+          {isHost && (
+            <button
+              id="final-play-again-btn"
+              onClick={() => {
+                playLockIn();
+                onPlayAgain();
+              }}
+              className="w-full sm:w-1/2 py-3.5 px-5 rounded-2xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-display font-bold text-base shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2 transition-transform active:scale-95 cursor-pointer"
+            >
+              <RotateCcw className="w-4 h-4" />
+              <span>Play Again</span>
+            </button>
+          )}
+
+          <button
+            id="final-new-game-btn"
+            onClick={() => {
+              playPop();
+              onNewGame();
+            }}
+            className="w-full sm:w-1/2 py-3.5 px-5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-white font-display font-bold text-base border border-slate-700 shadow-md flex items-center justify-center gap-2 transition-transform active:scale-95 cursor-pointer"
+          >
+            <Home className="w-4 h-4" />
+            <span>Leave to Home</span>
+          </button>
+        </div>
       </div>
+
     </div>
   );
 };

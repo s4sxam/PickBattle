@@ -26,7 +26,7 @@ Use the exact pick labels given to you (e.g. "Pick A", "Pick B") in the ranking 
 
 let aiClient: GoogleGenAI | null = null;
 function getGenAI(): GoogleGenAI | null {
-  const key = process.env.GEMINI_API_KEY1 || process.env.GEMINI_API_KEY;
+  const key = process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEY1;
   if (!key) return null;
   if (!aiClient) {
     aiClient = new GoogleGenAI({
@@ -56,7 +56,7 @@ export default async function handler(req: any, res: any) {
     }
   }
 
-  const { category, items } = body || {};
+  const { category, items, equalizedMatchup } = body || {};
   if (!category || !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: 'Invalid category or items' });
   }
@@ -67,7 +67,16 @@ export default async function handler(req: any, res: any) {
       const picksDescription = (items as JudgeItem[])
         .map((it) => `${it.label}: ${it.pick}`)
         .join('\n');
-      const userContent = `Category: ${category}\n\nPicks to judge:\n${picksDescription}`;
+
+      let userContent = `Category: ${category}\n\nPicks to judge:\n${picksDescription}`;
+
+      if (equalizedMatchup && equalizedMatchup.isEqualized) {
+        userContent += `\n\n⚡ SPECIAL BATTLE HANDICAP - ARENA POWER EQUALIZER ACTIVE:
+Tier Disparity Detected: ${equalizedMatchup.tierGap}
+- LIMITATION TASK for ${equalizedMatchup.overpoweredContender}: ${equalizedMatchup.limitationTask}
+- TACTICAL BUFF for ${equalizedMatchup.underdogContender}: ${equalizedMatchup.underdogAdvantage}
+Judging Instruction for this duel: All cosmic reality-warping, planet-destroying beams, and omnipotence are strictly sealed. The combatants are scaled to human combat thresholds. Judge based strictly on martial arts technique, tactical ingenuity, combat IQ, and performance under these limitations!`;
+      }
 
       const response = await ai.models.generateContent({
         model: 'gemini-3.8-flash',

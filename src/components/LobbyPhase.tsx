@@ -13,7 +13,10 @@ import {
   Vote,
   Lock,
   Zap,
+  Mic,
+  MicOff,
 } from 'lucide-react';
+
 import { motion } from 'motion/react';
 import { Room, Player, GameMode } from '../types';
 import { playPop, playLockIn } from '../utils/sound';
@@ -283,9 +286,22 @@ export const LobbyPhase: React.FC<LobbyPhaseProps> = ({
               }`}
             >
               <div className="flex items-center gap-3 min-w-0">
-                <span className="text-2xl sm:text-3xl p-1.5 bg-slate-800/80 rounded-xl border border-slate-700/60 aspect-square flex items-center justify-center">
-                  {player.avatarEmoji}
-                </span>
+                <div className="relative">
+                  <span className={`text-2xl sm:text-3xl p-1.5 bg-slate-800/80 rounded-xl border border-slate-700/60 aspect-square flex items-center justify-center transition-all ${
+                    room.voiceStates?.[player.id]?.isSpeaking ? 'ring-2 ring-emerald-400 animate-pulse' : ''
+                  }`}>
+                    {player.avatarEmoji}
+                  </span>
+                  {room.voiceStates?.[player.id]?.inVoiceCall && (
+                    <span className={`absolute -bottom-1 -right-1 p-0.5 rounded-full text-[9px] border shadow-sm ${
+                      room.voiceStates[player.id].isMuted
+                        ? 'bg-rose-900 border-rose-500 text-rose-300'
+                        : 'bg-emerald-900 border-emerald-500 text-emerald-300'
+                    }`} title={room.voiceStates[player.id].isMuted ? 'Muted' : 'In Voice'}>
+                      {room.voiceStates[player.id].isMuted ? <MicOff className="w-2.5 h-2.5" /> : <Mic className="w-2.5 h-2.5" />}
+                    </span>
+                  )}
+                </div>
                 <div className="flex flex-col text-left truncate">
                   <div className="flex items-center gap-1.5">
                     <span className="font-bold text-white text-sm truncate">
@@ -293,6 +309,16 @@ export const LobbyPhase: React.FC<LobbyPhaseProps> = ({
                     </span>
                     {player.isHost && (
                       <Crown className="w-3.5 h-3.5 text-amber-400 shrink-0" title="Host" />
+                    )}
+                    {room.voiceStates?.[player.id]?.inVoiceCall && (
+                      <span className="text-[9px] font-bold px-1.5 py-0.2 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                        Voice
+                      </span>
+                    )}
+                    {player.isSpectator && (
+                      <span className="text-[10px] uppercase font-extrabold px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                        Spectator
+                      </span>
                     )}
                     {isMe && (
                       <span className="text-[10px] uppercase font-extrabold px-1.5 py-0.5 rounded bg-amber-400/20 text-amber-300">
@@ -305,6 +331,7 @@ export const LobbyPhase: React.FC<LobbyPhaseProps> = ({
                   </span>
                 </div>
               </div>
+
 
               {isHost && player.isBot && (
                 <button

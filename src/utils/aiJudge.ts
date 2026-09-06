@@ -1,4 +1,5 @@
 import { findPickDossier, compareContenders } from '../data';
+import { EqualizedMatchup } from '../types';
 
 export interface JudgeItem {
   label: string; // e.g. "Pick A", "Pick B"
@@ -11,7 +12,11 @@ export interface JudgeResult {
 }
 
 // Built-in intelligent encyclopedic judge with comprehensive data across Anime, Cars, Foods, and all modes
-export function fallbackJudge(category: string, items: JudgeItem[]): JudgeResult {
+export function fallbackJudge(
+  category: string,
+  items: JudgeItem[],
+  equalizedMatchup?: EqualizedMatchup | null
+): JudgeResult {
   if (items.length === 0) {
     return { ranking: [], verdict: 'No picks submitted to judge.' };
   }
@@ -27,6 +32,14 @@ export function fallbackJudge(category: string, items: JudgeItem[]): JudgeResult
   if (items.length === 2) {
     const comp = compareContenders(category, items[0].pick, items[1].pick);
     const ranking = comp.ranking.map((r) => (r === 'Pick A' ? items[0].label : items[1].label));
+
+    if (equalizedMatchup && equalizedMatchup.isEqualized) {
+      return {
+        ranking,
+        verdict: `⚡ [EQUALIZED MATCHUP] ${comp.verdict}`,
+      };
+    }
+
     return {
       ranking,
       verdict: comp.verdict,
@@ -69,7 +82,11 @@ export function fallbackJudge(category: string, items: JudgeItem[]): JudgeResult
 }
 
 // Calls server-side Gemini 3.8 Flash endpoint, automatically falling back to client heuristic
-export async function judgePicks(category: string, items: JudgeItem[]): Promise<JudgeResult> {
+export async function judgePicks(
+  category: string,
+  items: JudgeItem[],
+  equalizedMatchup?: EqualizedMatchup | null
+): Promise<JudgeResult> {
   if (items.length === 0) {
     return { ranking: [], verdict: 'No picks submitted.' };
   }
@@ -85,7 +102,7 @@ export async function judgePicks(category: string, items: JudgeItem[]): Promise<
     const res = await fetch('/api/ai-judge', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ category, items }),
+      body: JSON.stringify({ category, items, equalizedMatchup }),
     });
 
     if (res.ok) {
@@ -107,5 +124,5 @@ export async function judgePicks(category: string, items: JudgeItem[]): Promise<
   }
 
   // Graceful fallback with zero user errors
-  return fallbackJudge(category, items);
+  return fallbackJudge(category, items, equalizedMatchup);
 }

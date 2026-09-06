@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Swords, Zap, Crown, ShieldAlert, Sparkles, Check, Flame, Trophy, Info } from 'lucide-react';
+import { Swords, Zap, Crown, ShieldAlert, Sparkles, Check, Flame, Trophy, Info, Scale, ShieldCheck, AlertTriangle } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { Room, Player, Duel } from '../types';
 import { playScouterTick, playClash, playKO, playTick, playPop, playVoteCast } from '../utils/sound';
@@ -27,8 +27,9 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ room, me, onVote }) =>
   const pickA = (duel && room.submissions[duel.playerAId]) || 'Wild Pick';
   const pickB = (duel && duel.playerBId && room.submissions[duel.playerBId]) || '';
 
-  const dossierA = useMemo(() => findPickDossier(room.category, pickA), [room.category, pickA]);
-  const dossierB = useMemo(() => (pickB ? findPickDossier(room.category, pickB) : null), [room.category, pickB]);
+  const activeCategory = room.currentCategory || (room as any).category || 'Anime Characters';
+  const dossierA = useMemo(() => findPickDossier(activeCategory, pickA), [activeCategory, pickA]);
+  const dossierB = useMemo(() => (pickB ? findPickDossier(activeCategory, pickB) : null), [activeCategory, pickB]);
 
   const isCombatant = me.id === duel?.playerAId || me.id === duel?.playerBId;
   const is2PlayerGame = room.players.filter((p) => p.connected).length <= 2;
@@ -215,6 +216,107 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ room, me, onVote }) =>
         </motion.div>
       )}
 
+      {/* Equalized Clash Resolution banner */}
+      {duel.resolvedReason === 'equalized_clash' && (
+        <motion.div
+          initial={{ scale: 0.9, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          className="w-full mb-4 px-4 py-2.5 rounded-2xl bg-gradient-to-r from-cyan-900/40 via-blue-900/40 to-cyan-900/40 border border-cyan-400/50 text-cyan-200 text-xs font-bold text-center flex items-center justify-center gap-2"
+        >
+          <Scale className="w-4 h-4 text-cyan-400 shrink-0" />
+          <span>⚖️ EQUALIZED CLASH RESOLVED: Decided strictly on martial arts & tactical strategy under battle handicaps!</span>
+        </motion.div>
+      )}
+
+      {/* Disqualification / Off-Topic Elimination Banner */}
+      {(dossierA?.isDisqualified || dossierB?.isDisqualified) && (
+        <motion.div
+          initial={{ scale: 0.95, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          className="w-full mb-4 p-3.5 rounded-2xl bg-gradient-to-r from-rose-950/80 via-slate-900 to-rose-950/80 border-2 border-rose-500/60 text-rose-200 text-xs font-bold text-left flex items-start gap-3 shadow-xl"
+        >
+          <div className="p-1.5 rounded-xl bg-rose-500/20 text-rose-300 border border-rose-500/40 shrink-0 mt-0.5">
+            <AlertTriangle className="w-5 h-5 text-rose-400" />
+          </div>
+          <div>
+            <div className="text-xs font-black uppercase text-rose-300 tracking-wide mb-0.5">
+              Strict Category Roster Elimination
+            </div>
+            <div className="text-slate-300 font-normal leading-relaxed text-[11px]">
+              {dossierA?.isDisqualified && dossierB?.isDisqualified ? (
+                <>Both submissions were not found in the official <strong>{activeCategory}</strong> database file. Both fighters forfeit!</>
+              ) : dossierA?.isDisqualified ? (
+                <>Contender A&apos;s pick (&quot;{pickA}&quot;) is not in the official <strong>{activeCategory}</strong> database. Automatic elimination awarded to Contender B!</>
+              ) : (
+                <>Contender B&apos;s pick (&quot;{pickB}&quot;) is not in the official <strong>{activeCategory}</strong> database. Automatic elimination awarded to Contender A!</>
+              )}
+            </div>
+          </div>
+        </motion.div>
+      )}
+
+      {/* Spectator Mode Live Banner */}
+      {me.isSpectator && (
+        <motion.div
+          initial={{ opacity: 0, y: -4 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="w-full mb-4 px-4 py-2.5 rounded-2xl bg-indigo-950/60 border border-indigo-500/40 text-indigo-200 text-xs flex items-center justify-between gap-2 shadow-lg"
+        >
+          <div className="flex items-center gap-2">
+            <span className="p-1 rounded-lg bg-indigo-500/20 text-indigo-300 font-bold">👀</span>
+            <div className="text-left">
+              <span className="font-bold text-white">Spectator Arena View</span>
+              <span className="hidden sm:inline text-indigo-300/80 ml-1.5">
+                • You joined an ongoing battle. You will enter active competition when the next match starts!
+              </span>
+            </div>
+          </div>
+          <span className="px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 text-[10px] font-extrabold uppercase shrink-0 border border-indigo-500/30">
+            Live Spectator
+          </span>
+        </motion.div>
+      )}
+
+      {/* Arena Matchup Equalizer Active Banner */}
+      {duel.equalizedMatchup?.isEqualized && !isBye && (
+        <motion.div
+          initial={{ opacity: 0, y: -6 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="w-full mb-4 p-4 rounded-2xl bg-gradient-to-r from-cyan-950/80 via-slate-900 to-blue-950/80 border-2 border-cyan-500/50 shadow-xl text-left"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-2.5">
+            <div className="flex items-center gap-2">
+              <span className="p-1 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                <Scale className="w-4 h-4" />
+              </span>
+              <span className="text-xs font-black uppercase tracking-wider text-cyan-300">
+                Arena Matchup Equalizer Activated ({duel.equalizedMatchup.tierGap})
+              </span>
+            </div>
+            <span className="text-[11px] font-mono text-cyan-400 bg-cyan-950/90 px-2.5 py-0.5 rounded-full border border-cyan-500/40">
+              Cosmic Powers Scaled & Sealed
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+            <div className="p-2.5 rounded-xl bg-slate-950/70 border border-rose-500/30 text-rose-200">
+              <div className="text-[10px] uppercase font-bold text-rose-400 mb-0.5 flex items-center gap-1">
+                <AlertTriangle className="w-3 h-3" />
+                <span>Limitation Task for {duel.equalizedMatchup.overpoweredContender}:</span>
+              </div>
+              <div className="leading-snug text-slate-200 font-medium">{duel.equalizedMatchup.limitationTask}</div>
+            </div>
+            <div className="p-2.5 rounded-xl bg-slate-950/70 border border-emerald-500/30 text-emerald-200">
+              <div className="text-[10px] uppercase font-bold text-emerald-400 mb-0.5 flex items-center gap-1">
+                <ShieldCheck className="w-3 h-3" />
+                <span>Tactical Buff for {duel.equalizedMatchup.underdogContender}:</span>
+              </div>
+              <div className="leading-snug text-slate-200 font-medium">{duel.equalizedMatchup.underdogAdvantage}</div>
+            </div>
+          </div>
+        </motion.div>
+      )}
+
       {/* AI Judge Deliberation Indicator */}
       {duel.aiDeliberating && !duel.winnerId && !isBye && (
         <motion.div
@@ -316,14 +418,63 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ room, me, onVote }) =>
           </div>
 
           {/* Pick display */}
-          <div className="my-3 py-3 px-4 rounded-2xl bg-slate-950/70 border border-slate-800/80">
-            <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-              Pick Choice
+          <div className={`my-3 py-3 px-4 rounded-2xl border ${
+            dossierA?.isDisqualified 
+              ? 'bg-rose-950/40 border-rose-500/60' 
+              : 'bg-slate-950/70 border-slate-800/80'
+          }`}>
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                Pick Choice
+              </span>
+              {dossierA?.isDisqualified && (
+                <span className="px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/40 text-[10px] font-black uppercase">
+                  Off-Topic Disqualification
+                </span>
+              )}
             </div>
-            <div className="font-display font-black text-xl sm:text-2xl text-white break-words">
+            <div className={`font-display font-black text-xl sm:text-2xl break-words ${
+              dossierA?.isDisqualified ? 'text-rose-300 line-through' : 'text-white'
+            }`}>
               &quot;{pickA}&quot;
             </div>
+
+            {/* Disqualification Notice */}
+            {dossierA?.isDisqualified && (
+              <div className="mt-2 pt-2 border-t border-rose-500/30 text-xs text-rose-300 flex items-start gap-1.5">
+                <AlertTriangle className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" />
+                <span>{dossierA.disqualificationReason || `Not found in official ${activeCategory} file. Automatically eliminated!` }</span>
+              </div>
+            )}
           </div>
+
+          {/* Equalizer Combatant Badge if active */}
+          {duel.equalizedMatchup?.isEqualized && (
+            <div className="my-2 p-2.5 rounded-xl border bg-slate-950/60 border-slate-800 text-xs">
+              {duel.equalizedMatchup.overpoweredPlayerId === duel.playerAId ||
+              duel.equalizedMatchup.overpoweredContender.toLowerCase() === pickA.toLowerCase() ? (
+                <div className="text-rose-200">
+                  <div className="flex items-center gap-1 text-[10px] font-black uppercase text-rose-400 mb-1">
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                    <span>Equalizer Limitation Task</span>
+                  </div>
+                  <p className="text-[11px] leading-snug font-medium text-slate-300">
+                    {duel.equalizedMatchup.limitationTask}
+                  </p>
+                </div>
+              ) : (
+                <div className="text-emerald-200">
+                  <div className="flex items-center gap-1 text-[10px] font-black uppercase text-emerald-400 mb-1">
+                    <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+                    <span>Tactical Equalizer Buff</span>
+                  </div>
+                  <p className="text-[11px] leading-snug font-medium text-slate-300">
+                    {duel.equalizedMatchup.underdogAdvantage}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Canonical Specs Dossier */}
           {dossierA && (
@@ -496,14 +647,63 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ room, me, onVote }) =>
               </div>
 
               {/* Pick display */}
-              <div className="my-3 py-3 px-4 rounded-2xl bg-slate-950/70 border border-slate-800/80">
-                <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-                  Pick Choice
+              <div className={`my-3 py-3 px-4 rounded-2xl border ${
+                dossierB?.isDisqualified 
+                  ? 'bg-rose-950/40 border-rose-500/60' 
+                  : 'bg-slate-950/70 border-slate-800/80'
+              }`}>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                    Pick Choice
+                  </span>
+                  {dossierB?.isDisqualified && (
+                    <span className="px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/40 text-[10px] font-black uppercase">
+                      Off-Topic Disqualification
+                    </span>
+                  )}
                 </div>
-                <div className="font-display font-black text-xl sm:text-2xl text-white break-words">
+                <div className={`font-display font-black text-xl sm:text-2xl break-words ${
+                  dossierB?.isDisqualified ? 'text-rose-300 line-through' : 'text-white'
+                }`}>
                   &quot;{pickB}&quot;
                 </div>
+
+                {/* Disqualification Notice */}
+                {dossierB?.isDisqualified && (
+                  <div className="mt-2 pt-2 border-t border-rose-500/30 text-xs text-rose-300 flex items-start gap-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" />
+                    <span>{dossierB.disqualificationReason || `Not found in official ${activeCategory} file. Automatically eliminated!` }</span>
+                  </div>
+                )}
               </div>
+
+              {/* Equalizer Combatant Badge if active */}
+              {duel.equalizedMatchup?.isEqualized && (
+                <div className="my-2 p-2.5 rounded-xl border bg-slate-950/60 border-slate-800 text-xs">
+                  {duel.equalizedMatchup.overpoweredPlayerId === duel.playerBId ||
+                  duel.equalizedMatchup.overpoweredContender.toLowerCase() === pickB.toLowerCase() ? (
+                    <div className="text-rose-200">
+                      <div className="flex items-center gap-1 text-[10px] font-black uppercase text-rose-400 mb-1">
+                        <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                        <span>Equalizer Limitation Task</span>
+                      </div>
+                      <p className="text-[11px] leading-snug font-medium text-slate-300">
+                        {duel.equalizedMatchup.limitationTask}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="text-emerald-200">
+                      <div className="flex items-center gap-1 text-[10px] font-black uppercase text-emerald-400 mb-1">
+                        <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+                        <span>Tactical Equalizer Buff</span>
+                      </div>
+                      <p className="text-[11px] leading-snug font-medium text-slate-300">
+                        {duel.equalizedMatchup.underdogAdvantage}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Canonical Specs Dossier */}
               {dossierB && (

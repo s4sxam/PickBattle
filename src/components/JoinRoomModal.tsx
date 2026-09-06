@@ -11,6 +11,8 @@ interface JoinRoomModalProps {
   onSubmit: (code: string, name: string, avatar: string) => void;
   isLoading: boolean;
   error?: string | null;
+  defaultName?: string;
+  defaultAvatar?: string;
 }
 
 export const JoinRoomModal: React.FC<JoinRoomModalProps> = ({
@@ -20,10 +22,19 @@ export const JoinRoomModal: React.FC<JoinRoomModalProps> = ({
   onSubmit,
   isLoading,
   error,
+  defaultName = '',
+  defaultAvatar = '😎',
 }) => {
   const [code, setCode] = useState(initialCode);
-  const [name, setName] = useState('');
-  const [avatar, setAvatar] = useState('😎');
+  const [name, setName] = useState(defaultName);
+  const [avatar, setAvatar] = useState(defaultAvatar);
+
+  React.useEffect(() => {
+    if (initialCode) setCode(initialCode);
+    if (defaultName) setName(defaultName);
+    if (defaultAvatar) setAvatar(defaultAvatar);
+  }, [initialCode, defaultName, defaultAvatar, isOpen]);
+
 
   if (!isOpen) return null;
 

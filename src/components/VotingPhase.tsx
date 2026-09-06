@@ -95,7 +95,7 @@ export const VotingPhase: React.FC<VotingPhaseProps> = ({
             };
           });
 
-  const activePlayers = (room.players || []).filter((p) => p.connected);
+  const activePlayers = (room.players || []).filter((p) => p.connected && !p.isSpectator);
   const totalVotesCast = Object.keys(room.votes || {}).length;
   const progressPercent =
     activePlayers.length > 0 ? (totalVotesCast / activePlayers.length) * 100 : 0;
@@ -131,6 +131,28 @@ export const VotingPhase: React.FC<VotingPhaseProps> = ({
         </div>
       </div>
 
+      {/* Spectator Mode Banner */}
+      {me.isSpectator && (
+        <motion.div
+          initial={{ opacity: 0, y: -4 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="w-full mb-4 px-4 py-2.5 rounded-2xl bg-indigo-950/60 border border-indigo-500/40 text-indigo-200 text-xs flex items-center justify-between gap-2 shadow-lg"
+        >
+          <div className="flex items-center gap-2">
+            <span className="p-1 rounded-lg bg-indigo-500/20 text-indigo-300 font-bold">👀</span>
+            <div className="text-left">
+              <span className="font-bold text-white">Spectator Live View</span>
+              <span className="hidden sm:inline text-indigo-300/80 ml-1.5">
+                • Active contenders are casting their votes. You will be entered into active competition in the next match!
+              </span>
+            </div>
+          </div>
+          <span className="px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 text-[10px] font-extrabold uppercase shrink-0 border border-indigo-500/30">
+            Spectating
+          </span>
+        </motion.div>
+      )}
+
       {/* Title & Instructions */}
       <motion.div
         initial={{ opacity: 0, y: -10 }}
@@ -138,11 +160,13 @@ export const VotingPhase: React.FC<VotingPhaseProps> = ({
         className="mb-6"
       >
         <h2 className="text-2xl sm:text-3xl font-display font-black text-white mb-1">
-          Pick Your Favorite Submission!
+          {me.isSpectator ? 'Live Voting Submissions' : 'Pick Your Favorite Submission!'}
         </h2>
         <p className="text-xs text-slate-400 flex items-center justify-center gap-1.5">
           <EyeOff className="w-3.5 h-3.5 text-indigo-400" />
-          All picks are anonymous and shuffled. You cannot vote for your own pick.
+          {me.isSpectator
+            ? 'Viewing anonymous contender submissions for this round'
+            : 'All picks are anonymous and shuffled. You cannot vote for your own pick.'}
         </p>
       </motion.div>
 
@@ -233,9 +257,17 @@ export const VotingPhase: React.FC<VotingPhaseProps> = ({
         })}
       </div>
 
-      {/* Lock in Action or Voted Status */}
+      {/* Lock in Action or Voted Status or Spectator notice */}
       <div className="w-full max-w-md mx-auto">
-        {hasVoted ? (
+        {me.isSpectator ? (
+          <motion.div
+            initial={{ scale: 0.95, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="p-4 rounded-2xl bg-indigo-500/10 border border-indigo-500/30 text-indigo-300 flex items-center justify-center gap-2 text-sm font-bold shadow-lg"
+          >
+            <span>👀 Spectating Vote • Results will be tallied shortly!</span>
+          </motion.div>
+        ) : hasVoted ? (
           <motion.div
             initial={{ scale: 0.9, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}

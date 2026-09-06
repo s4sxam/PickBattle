@@ -11,6 +11,8 @@ import {
 } from '../types';
 import { CATEGORIES, FLAVOR_LINES, BOT_NAMES, sanitizeText } from '../utils/gameData';
 import { judgePicks, fallbackJudge } from '../utils/aiJudge';
+import { checkDuplicateCharacterInMatch, getUsedAnimeCharactersForPlayer } from '../utils/animeRules';
+import { checkEqualizedMatchup } from '../utils/matchupEqualizer';
 
 export interface NetworkConnection {
   id: string; // unique socket/peer id
@@ -198,6 +200,7 @@ export class BrowserGameEngine {
       currentRoundNumber: 0,
       totalRounds: 6,
       currentCategory: null,
+      category: null,
       submissions: {},
       bracket: null,
       votes: {},
@@ -248,10 +251,8 @@ export class BrowserGameEngine {
       }
     }
 
-    if (this.room.status !== 'lobby') {
-      if (callback) callback({ success: false, error: 'Game is already in progress.' });
-      return;
-    }
+    const isOngoing = this.room.status !== 'lobby';
+    const isSpectator = isOngoing || Boolean((payload as any)?.isSpectator);
 
     const playerSanitized = sanitizeText(payload?.name || 'Player', 16);
     const playerName = playerSanitized.isValid ? playerSanitized.clean : 'Player';
@@ -267,11 +268,12 @@ export class BrowserGameEngine {
       isHost: false,
       connected: true,
       isBot: false,
+      isSpectator,
     };
 
     this.room.players.push(newPlayer);
     this.broadcastState();
-    if (callback) callback({ success: true, roomCode: code, playerId: newPlayerId });
+    if (callback) callback({ success: true, roomCode: code, playerId: newPlayerId, isSpectator });
   }
 
   private handleSetGameMode(connId: string, payload: { mode: GameMode }) {
@@ -325,9 +327,13 @@ export class BrowserGameEngine {
   private handleSelectCategory(connId: string, payload: { category: string }) {
     if (!this.room || this.room.status !== 'category-select') return;
     const sender = this.room.players.find((p) => p.socketId === connId);
-    if (!sender || !sender.isHost) return;
+    if (!sender) return;
 
-    this.room.currentCategory = payload.category;
+    const san = sanitizeText(payload?.category || '', 40);
+    const finalCategory = san.isValid ? san.clean : 'Anime Characters';
+
+    this.room.currentCategory = finalCategory;
+    this.room.category = finalCategory;
     this.room.submissions = {};
     this.room.bracket = null;
     this.room.votes = {};
@@ -355,17 +361,33 @@ export class BrowserGameEngine {
   private handleSubmitPick(connId: string, payload: { pick: string }) {
     if (!this.room || this.room.status !== 'submitting') return;
     const sender = this.room.players.find((p) => p.socketId === connId);
-    if (!sender) return;
+    if (!sender || sender.isSpectator) return;
 
     const san = sanitizeText(payload?.pick || '', 50);
-    this.room.submissions[sender.id] = san.isValid ? san.clean : 'Mystery Pick';
+    const cleanPick = san.isValid ? san.clean : 'Mystery Pick';
+
+    // Disallow duplicate anime character deployment in the same match
+    const dupCheck = checkDuplicateCharacterInMatch(
+      this.room,
+      sender.id,
+      cleanPick,
+      this.room.currentCategory
+    );
+    if (dupCheck.isDuplicate) {
+      this.sendTo(connId, 'error', {
+        message: `"${dupCheck.canonicalName}" was already used by you in Round ${dupCheck.matchedRound}! Each anime character can only be used once per match.`,
+      });
+      return;
+    }
+
+    this.room.submissions[sender.id] = cleanPick;
     this.broadcastState();
     this.checkAllSubmitted();
   }
 
   private checkAllSubmitted() {
     if (!this.room || this.room.status !== 'submitting') return;
-    const activePlayers = this.room.players.filter((p) => p.connected);
+    const activePlayers = this.room.players.filter((p) => p.connected && !p.isSpectator);
     if (activePlayers.length === 0) return;
     const allIn = activePlayers.every((p) => Boolean(this.room!.submissions[p.id]));
     if (allIn) {
@@ -380,7 +402,7 @@ export class BrowserGameEngine {
 
   private handleBotSubmissions() {
     if (!this.room) return;
-    const bots = this.room.players.filter((p) => p.isBot && p.connected);
+    const bots = this.room.players.filter((p) => p.isBot && p.connected && !p.isSpectator);
     if (bots.length === 0) return;
 
     const currentCat =
@@ -392,8 +414,17 @@ export class BrowserGameEngine {
         if (!this.room || this.room.status !== 'submitting') return;
         if (this.room.submissions[bot.id]) return;
 
+        // Filter out picks already deployed by this bot in earlier rounds of the match
+        const usedByBot = getUsedAnimeCharactersForPlayer(this.room!, bot.id).map((r) =>
+          r.characterName.toLowerCase()
+        );
+        const availablePicks = currentCat.botPicks.filter(
+          (p) => !usedByBot.some((u) => p.toLowerCase().includes(u) || u.includes(p.toLowerCase()))
+        );
+        const pool = availablePicks.length > 0 ? availablePicks : currentCat.botPicks;
+
         const randomPick =
-          currentCat.botPicks[Math.floor(Math.random() * currentCat.botPicks.length)] ||
+          pool[Math.floor(Math.random() * pool.length)] ||
           `${currentCat.name} Champion`;
 
         this.room.submissions[bot.id] = randomPick;
@@ -412,7 +443,7 @@ export class BrowserGameEngine {
     const durationMs = 22000;
     this.room.votingDeadline = Date.now() + durationMs;
 
-    const activePlayers = this.room.players.filter((p) => p.connected);
+    const activePlayers = this.room.players.filter((p) => p.connected && !p.isSpectator);
     for (const p of activePlayers) {
       if (!this.room.submissions[p.id]) {
         this.room.submissions[p.id] = `${p.name}'s Mystery Pick`;
@@ -423,7 +454,7 @@ export class BrowserGameEngine {
 
     // Send options to every player connection
     for (const p of this.room.players) {
-      if (p.connected && !p.isBot) {
+      if (p.connected && !p.isBot && !p.isSpectator) {
         this.sendVotingOptionsToPlayer(p.socketId, p);
       }
     }
@@ -440,7 +471,7 @@ export class BrowserGameEngine {
   }
 
   private sendVotingOptionsToPlayer(connId: string, player: Player) {
-    if (!this.room) return;
+    if (!this.room || player.isSpectator) return;
     const allSubmissions = Object.entries(this.room.submissions).map(([playerId, pick]) => ({
       playerId,
       pick,
@@ -477,7 +508,7 @@ export class BrowserGameEngine {
 
   private handleBotVotes() {
     if (!this.room) return;
-    const bots = this.room.players.filter((p) => p.isBot && p.connected);
+    const bots = this.room.players.filter((p) => p.isBot && p.connected && !p.isSpectator);
     if (bots.length === 0) return;
 
     const validTargets = Object.keys(this.room.submissions);
@@ -502,7 +533,7 @@ export class BrowserGameEngine {
   private handleSubmitVote(connId: string, payload: { targetPlayerId: string }) {
     if (!this.room || this.room.status !== 'voting') return;
     const sender = this.room.players.find((p) => p.socketId === connId);
-    if (!sender) return;
+    if (!sender || sender.isSpectator) return;
 
     if (sender.id === payload?.targetPlayerId) return;
     if (!this.room.submissions[payload?.targetPlayerId]) return;
@@ -514,7 +545,7 @@ export class BrowserGameEngine {
 
   private checkAllVoted() {
     if (!this.room || this.room.status !== 'voting') return;
-    const activePlayers = this.room.players.filter((p) => p.connected);
+    const activePlayers = this.room.players.filter((p) => p.connected && !p.isSpectator);
     if (activePlayers.length === 0) return;
     const allVoted = activePlayers.every((p) => Boolean(this.room!.votes[p.id]));
     if (allVoted) {
@@ -534,14 +565,14 @@ export class BrowserGameEngine {
     this.clearTimer('all');
     this.room.status = 'battle';
 
-    const activePlayers = this.room.players.filter((p) => p.connected);
+    const activePlayers = this.room.players.filter((p) => p.connected && !p.isSpectator);
     for (const p of activePlayers) {
       if (!this.room.submissions[p.id]) {
         this.room.submissions[p.id] = `${p.name}'s Wild Pick`;
       }
     }
 
-    const submittedPlayerIds = Object.keys(this.room.submissions);
+    const submittedPlayerIds = activePlayers.map((p) => p.id);
     const shuffledIds = this.shuffleArray(submittedPlayerIds);
     const initialDuels = this.createRoundDuels(shuffledIds, 1);
 
@@ -610,16 +641,41 @@ export class BrowserGameEngine {
       (p) => p.connected && p.id !== currentDuel.playerAId && p.id !== currentDuel.playerBId
     );
 
-    // AI Judge Deliberation (asynchronous with instant fallback)
-    currentDuel.aiDeliberating = true;
-    const duelId = currentDuel.id;
     const pickA = this.room.submissions[currentDuel.playerAId] || 'Wild Pick';
     const pickB = (currentDuel.playerBId && this.room.submissions[currentDuel.playerBId]) || 'Wild Pick';
 
-    judgePicks(this.room.currentCategory || 'Power Battle', [
-      { label: 'Pick A', pick: pickA },
-      { label: 'Pick B', pick: pickB },
-    ]).then((res) => {
+    // Compute Arena Equalization for unfair matchups (Universe tier vs Earth tier)
+    if (currentDuel.playerBId) {
+      const equalized = checkEqualizedMatchup(this.room.currentCategory, pickA, pickB);
+      if (equalized) {
+        currentDuel.equalizedMatchup = {
+          ...equalized,
+          overpoweredPlayerId:
+            equalized.overpoweredContender.toLowerCase() === pickA.toLowerCase()
+              ? currentDuel.playerAId
+              : currentDuel.playerBId,
+          underdogPlayerId:
+            equalized.underdogContender.toLowerCase() === pickA.toLowerCase()
+              ? currentDuel.playerAId
+              : currentDuel.playerBId,
+        };
+        currentDuel.powerLevelA = equalized.equalizedPowerA;
+        currentDuel.powerLevelB = equalized.equalizedPowerB;
+      }
+    }
+
+    // AI Judge Deliberation (asynchronous with instant fallback)
+    currentDuel.aiDeliberating = true;
+    const duelId = currentDuel.id;
+
+    judgePicks(
+      this.room.currentCategory || 'Power Battle',
+      [
+        { label: 'Pick A', pick: pickA },
+        { label: 'Pick B', pick: pickB },
+      ],
+      currentDuel.equalizedMatchup
+    ).then((res) => {
       if (!this.room || !this.room.bracket) return;
       const d =
         this.room.bracket.duelRounds[this.room.bracket.activeRoundIndex]?.[
@@ -709,7 +765,11 @@ export class BrowserGameEngine {
     if (!currentDuel || currentDuel.winnerId !== null) return;
 
     const eligibleSpectators = this.room.players.filter(
-      (p) => p.connected && p.id !== currentDuel.playerAId && p.id !== currentDuel.playerBId
+      (p) =>
+        p.connected &&
+        !p.isSpectator &&
+        p.id !== currentDuel.playerAId &&
+        p.id !== currentDuel.playerBId
     );
 
     if (
@@ -746,10 +806,14 @@ export class BrowserGameEngine {
       const pickA = this.room.submissions[currentDuel.playerAId] || 'Wild Pick';
       const pickB =
         (currentDuel.playerBId && this.room.submissions[currentDuel.playerBId]) || 'Wild Pick';
-      const judged = fallbackJudge(this.room.currentCategory || 'Power Battle', [
-        { label: 'Pick A', pick: pickA },
-        { label: 'Pick B', pick: pickB },
-      ]);
+      const judged = fallbackJudge(
+        this.room.currentCategory || 'Power Battle',
+        [
+          { label: 'Pick A', pick: pickA },
+          { label: 'Pick B', pick: pickB },
+        ],
+        currentDuel.equalizedMatchup
+      );
       currentDuel.aiVerdict = judged.verdict;
       currentDuel.aiWinnerLabel = judged.ranking[0];
       winnerId =
@@ -759,17 +823,27 @@ export class BrowserGameEngine {
     }
 
     currentDuel.winnerId = winnerId;
-    currentDuel.resolvedReason = 'ai_judge';
+    currentDuel.resolvedReason = currentDuel.equalizedMatchup?.isEqualized
+      ? 'equalized_clash'
+      : 'ai_judge';
     currentDuel.aiDeliberating = false;
 
     // Boost winner's Scouter Power Level visually to reflect victory
-    if (winnerId === currentDuel.playerAId) {
-      if (currentDuel.powerLevelA <= currentDuel.powerLevelB) {
-        currentDuel.powerLevelA = Math.max(currentDuel.powerLevelB + 300000, 4000000);
+    if (currentDuel.equalizedMatchup?.isEqualized) {
+      if (winnerId === currentDuel.playerAId && currentDuel.powerLevelA <= currentDuel.powerLevelB) {
+        currentDuel.powerLevelA = currentDuel.powerLevelB + 15000;
+      } else if (currentDuel.playerBId && winnerId === currentDuel.playerBId && currentDuel.powerLevelB <= currentDuel.powerLevelA) {
+        currentDuel.powerLevelB = currentDuel.powerLevelA + 15000;
       }
-    } else if (currentDuel.playerBId && winnerId === currentDuel.playerBId) {
-      if (currentDuel.powerLevelB <= currentDuel.powerLevelA) {
-        currentDuel.powerLevelB = Math.max(currentDuel.powerLevelA + 300000, 4000000);
+    } else {
+      if (winnerId === currentDuel.playerAId) {
+        if (currentDuel.powerLevelA <= currentDuel.powerLevelB) {
+          currentDuel.powerLevelA = Math.max(currentDuel.powerLevelB + 300000, 4000000);
+        }
+      } else if (currentDuel.playerBId && winnerId === currentDuel.playerBId) {
+        if (currentDuel.powerLevelB <= currentDuel.powerLevelA) {
+          currentDuel.powerLevelB = Math.max(currentDuel.powerLevelA + 300000, 4000000);
+        }
       }
     }
 
@@ -974,6 +1048,7 @@ export class BrowserGameEngine {
         this.room.currentRoundNumber++;
         this.room.status = 'category-select';
         this.room.currentCategory = null;
+        this.room.category = null;
         this.room.submissions = {};
         this.room.bracket = null;
         this.room.votes = {};
@@ -994,6 +1069,7 @@ export class BrowserGameEngine {
     this.room.status = 'lobby';
     this.room.currentRoundNumber = 0;
     this.room.currentCategory = null;
+    this.room.category = null;
     this.room.submissions = {};
     this.room.bracket = null;
     this.room.votes = {};
@@ -1001,6 +1077,7 @@ export class BrowserGameEngine {
     this.room.roundHistory = [];
     this.room.players.forEach((p) => {
       p.score = 0;
+      p.isSpectator = false;
     });
 
     this.broadcastState();

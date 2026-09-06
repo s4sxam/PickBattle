@@ -33,7 +33,7 @@ export const ALL_CATEGORY_DATABASES: Record<string, ContenderDossier[]> = {
 };
 
 // Clean string for fuzzy matching
-function normalizeText(txt: string): string {
+export function normalizeText(txt: string): string {
   return txt
     .toLowerCase()
     .replace(/[^\w\s]/g, '')
@@ -52,10 +52,10 @@ function hashString(str: string): number {
 /**
  * Procedurally generate realistic, authentic stats for any pick searched on Google / entered by user
  */
-function synthesizeDossier(categoryKey: string, rawPick: string): ContenderDossier {
-  const norm = normalizeText(rawPick);
+function synthesizeDossier(categoryKey?: string | null, rawPick?: string): ContenderDossier {
+  const norm = normalizeText(rawPick || 'Wild Pick');
   const h = hashString(norm);
-  const cat = categoryKey.toLowerCase();
+  const cat = (categoryKey || 'anime').toLowerCase();
 
   if (cat.includes('car') || cat.includes('vehicle')) {
     const hp = 450 + (h % 900); // 450 - 1350 HP
@@ -147,61 +147,259 @@ function synthesizeDossier(categoryKey: string, rawPick: string): ContenderDossi
   };
 }
 
+export function getCategoryKey(category?: string | null): string {
+  const cat = (category || 'anime').toLowerCase();
+  if (cat.includes('anime')) return 'anime';
+  if (cat.includes('cartoon')) return 'cartoons';
+  if (cat.includes('car') || cat.includes('vehicle')) return 'cars';
+  if (cat.includes('music') || cat.includes('band')) return 'musicians';
+  if (cat.includes('athlete') || cat.includes('sport')) return 'athletes';
+  if (cat.includes('game')) return 'games';
+  if (cat.includes('superhero') || cat.includes('comic')) return 'superheroes';
+  if (cat.includes('food') || cat.includes('snack')) return 'foods';
+  if (cat.includes('villain')) return 'villains';
+  if (cat.includes('myth')) return 'mythology';
+  if (cat.includes('scifi') || cat.includes('sci-fi') || cat.includes('cyberpunk')) return 'scifi';
+  if (cat.includes('wrestl') || cat.includes('combat')) return 'wrestlers';
+  if (cat.includes('wildcard') || cat.includes('anything')) return 'wildcard';
+  return 'anime';
+}
+
+export function createDisqualifiedDossier(
+  category?: string | null,
+  rawPick?: string
+): ContenderDossier {
+  const safeName = (rawPick || 'Invalid Pick').trim();
+  const catLabel = category || 'Category';
+  return {
+    name: safeName,
+    aliases: [normalizeText(safeName)],
+    category: getCategoryKey(category),
+    universeOrOrigin: `Off-Topic / Not in ${catLabel} File`,
+    score: 0,
+    scouterPowerLevel: 0,
+    isDisqualified: true,
+    disqualificationReason: `"${safeName}" was not found in the official ${catLabel} database file.`,
+    badges: [
+      { label: 'Status', value: 'ELIMINATED / DISQUALIFIED', highlight: true },
+      { label: 'Roster Violation', value: `Not in ${catLabel} File` },
+      { label: 'Power Level', value: '0 (Forfeit)' },
+      { label: 'Penalty', value: 'Wait for Next Round' },
+    ],
+    headlineFeat: `Disqualified from battle: "${safeName}" does not exist in the official ${catLabel} roster file.`,
+    verdictSnippet: `Automatically eliminated due to off-topic / unlisted submission. Must wait for the next round.`,
+  };
+}
+
+export interface CategoryRosterCheckResult {
+  isAllowed: boolean;
+  dossier: ContenderDossier;
+  canonicalName: string;
+  matchedFromCategoryFile: boolean;
+  categoryKey: string;
+  reason?: string;
+}
+
 /**
- * Find the most accurate dossier for a pick in a category
+ * Validates strictly whether an entered pick is in the active category's database file.
+ * If not in the category file, it is automatically marked as disqualified / eliminated.
  */
-export function findPickDossier(category: string, rawPick: string): ContenderDossier {
-  if (!rawPick || !rawPick.trim()) {
-    return synthesizeDossier(category, 'Wild Mystery Pick');
+export function checkCategoryRosterMatch(
+  category?: string | null,
+  rawPick?: string
+): CategoryRosterCheckResult {
+  const catKey = getCategoryKey(category);
+  const targetDb = ALL_CATEGORY_DATABASES[catKey] || [];
+  const cleanPick = (rawPick || '').trim();
+
+  if (!cleanPick) {
+    const disq = createDisqualifiedDossier(category, 'Empty Pick');
+    return {
+      isAllowed: false,
+      dossier: disq,
+      canonicalName: 'Empty Pick',
+      matchedFromCategoryFile: false,
+      categoryKey: catKey,
+      reason: 'No pick was submitted.',
+    };
   }
 
-  const cleanQuery = normalizeText(rawPick);
+  const cleanQuery = normalizeText(cleanPick);
+  const strippedParenthesis = cleanPick.replace(/\s*\([^)]*\)/g, '').trim();
+  const cleanStripped = normalizeText(strippedParenthesis);
 
-  // 1. Check direct category database
-  const matchingCategoryKey = Object.keys(ALL_CATEGORY_DATABASES).find((k) =>
-    category.toLowerCase().includes(k)
-  );
-  const targetDb = matchingCategoryKey ? ALL_CATEGORY_DATABASES[matchingCategoryKey] : [];
-
-  // Search in target DB
+  // 1. Exact match on name in category database file
   for (const item of targetDb) {
-    if (normalizeText(item.name) === cleanQuery) return item;
-    if (item.aliases.some((a) => normalizeText(a) === cleanQuery)) return item;
-    if (cleanQuery.includes(normalizeText(item.name)) || normalizeText(item.name).includes(cleanQuery)) {
-      return item;
-    }
-    for (const alias of item.aliases) {
-      if (cleanQuery.includes(normalizeText(alias))) return item;
+    const itemNorm = normalizeText(item.name);
+    if (itemNorm === cleanQuery || (cleanStripped.length > 0 && itemNorm === cleanStripped)) {
+      return {
+        isAllowed: true,
+        dossier: item,
+        canonicalName: item.name,
+        matchedFromCategoryFile: true,
+        categoryKey: catKey,
+      };
     }
   }
 
-  // 2. Search across all databases if not found in primary
-  for (const db of Object.values(ALL_CATEGORY_DATABASES)) {
-    for (const item of db) {
-      if (normalizeText(item.name) === cleanQuery) return item;
-      if (item.aliases.some((a) => normalizeText(a) === cleanQuery)) return item;
-      if (cleanQuery.includes(normalizeText(item.name)) || normalizeText(item.name).includes(cleanQuery)) {
-        return item;
+  // 2. Exact match on aliases in category database file
+  for (const item of targetDb) {
+    if (item.aliases) {
+      for (const alias of item.aliases) {
+        const aliasNorm = normalizeText(alias);
+        if (aliasNorm === cleanQuery || (cleanStripped.length > 0 && aliasNorm === cleanStripped)) {
+          return {
+            isAllowed: true,
+            dossier: item,
+            canonicalName: item.name,
+            matchedFromCategoryFile: true,
+            categoryKey: catKey,
+          };
+        }
       }
     }
   }
 
-  // 3. Synthesize realistic grounded dossier based on query and category
-  return synthesizeDossier(category, rawPick);
+  // 3. Substring / Containment match in category database file (requires length >= 3)
+  for (const item of targetDb) {
+    const itemNorm = normalizeText(item.name);
+    if (itemNorm.length >= 3 && cleanQuery.length >= 3) {
+      if (cleanQuery.includes(itemNorm) || (cleanStripped.length >= 3 && cleanStripped.includes(itemNorm))) {
+        return {
+          isAllowed: true,
+          dossier: item,
+          canonicalName: item.name,
+          matchedFromCategoryFile: true,
+          categoryKey: catKey,
+        };
+      }
+      if (itemNorm.includes(cleanQuery) || (cleanStripped.length >= 3 && itemNorm.includes(cleanStripped))) {
+        return {
+          isAllowed: true,
+          dossier: item,
+          canonicalName: item.name,
+          matchedFromCategoryFile: true,
+          categoryKey: catKey,
+        };
+      }
+    }
+
+    if (item.aliases) {
+      for (const alias of item.aliases) {
+        const aliasNorm = normalizeText(alias);
+        if (aliasNorm.length >= 3 && cleanQuery.length >= 3) {
+          if (cleanQuery.includes(aliasNorm) || aliasNorm.includes(cleanQuery)) {
+            return {
+              isAllowed: true,
+              dossier: item,
+              canonicalName: item.name,
+              matchedFromCategoryFile: true,
+              categoryKey: catKey,
+            };
+          }
+        }
+      }
+    }
+  }
+
+  // Not in the official category file -> Eliminated
+  const disq = createDisqualifiedDossier(category, cleanPick);
+  const catLabel = category || 'this category';
+  return {
+    isAllowed: false,
+    dossier: disq,
+    canonicalName: cleanPick,
+    matchedFromCategoryFile: false,
+    categoryKey: catKey,
+    reason: `"${cleanPick}" is not found in the official ${catLabel} roster file. Automatically eliminated!`,
+  };
 }
 
 /**
- * Compare two picks using their real encyclopedic data and output a decisive winner and punchy verdict
+ * Searches the active category database file for live autocomplete and allowed character suggestions.
+ */
+export function searchCategoryRoster(
+  category?: string | null,
+  query?: string,
+  limit = 8
+): ContenderDossier[] {
+  const catKey = getCategoryKey(category);
+  const targetDb = ALL_CATEGORY_DATABASES[catKey] || [];
+  if (!query || !query.trim()) {
+    return targetDb.slice(0, limit);
+  }
+
+  const qNorm = normalizeText(query);
+  const results: ContenderDossier[] = [];
+  const seen = new Set<string>();
+
+  for (const item of targetDb) {
+    if (results.length >= limit) break;
+    const nameNorm = normalizeText(item.name);
+    const matchesName = nameNorm.includes(qNorm);
+    const matchesAlias = item.aliases?.some((a) => normalizeText(a).includes(qNorm));
+    const matchesUniverse = item.universeOrOrigin && normalizeText(item.universeOrOrigin).includes(qNorm);
+
+    if (matchesName || matchesAlias || matchesUniverse) {
+      if (!seen.has(nameNorm)) {
+        seen.add(nameNorm);
+        results.push(item);
+      }
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Find the most accurate dossier for a pick strictly in the chosen category.
+ * If not in the category file, returns an eliminated / disqualified dossier with 0 power.
+ */
+export function findPickDossier(category?: string | null, rawPick?: string): ContenderDossier {
+  const check = checkCategoryRosterMatch(category, rawPick);
+  return check.dossier;
+}
+
+/**
+ * Compare two picks using their real encyclopedic data and output a decisive winner and punchy verdict.
+ * Enforces automatic instant elimination if a pick is not in the official category file.
  */
 export function compareContenders(
-  category: string,
+  category: string | undefined | null,
   pickA: string,
   pickB: string
 ): { ranking: ['Pick A', 'Pick B'] | ['Pick B', 'Pick A']; verdict: string } {
-  const dossierA = findPickDossier(category, pickA);
-  const dossierB = findPickDossier(category, pickB);
+  const safeCategory = category || 'Anime Characters';
+  const checkA = checkCategoryRosterMatch(safeCategory, pickA);
+  const checkB = checkCategoryRosterMatch(safeCategory, pickB);
+  const dossierA = checkA.dossier;
+  const dossierB = checkB.dossier;
 
-  // Compare scouter power levels & score
+  // Case 1: Both disqualified
+  if (dossierA.isDisqualified && dossierB.isDisqualified) {
+    return {
+      ranking: ['Pick A', 'Pick B'],
+      verdict: `🚨 [DOUBLE ELIMINATION] Both "${pickA}" and "${pickB}" are disqualified for not being in the official ${safeCategory} roster file! Neither contender advances.`,
+    };
+  }
+
+  // Case 2: Pick A is disqualified (e.g., "98" or "doraemon" in Anime), Pick B is valid
+  if (dossierA.isDisqualified && !dossierB.isDisqualified) {
+    return {
+      ranking: ['Pick B', 'Pick A'],
+      verdict: `🚨 [AUTOMATIC ELIMINATION] "${pickA}" is disqualified and eliminated (not in the official ${safeCategory} file)! ${dossierB.name} wins by automatic forfeit!`,
+    };
+  }
+
+  // Case 3: Pick B is disqualified, Pick A is valid
+  if (!dossierA.isDisqualified && dossierB.isDisqualified) {
+    return {
+      ranking: ['Pick A', 'Pick B'],
+      verdict: `🚨 [AUTOMATIC ELIMINATION] "${pickB}" is disqualified and eliminated (not in the official ${safeCategory} file)! ${dossierA.name} wins by automatic forfeit!`,
+    };
+  }
+
+  // Case 4: Both are valid contenders in the category roster
   const diff = dossierA.score - dossierB.score;
   const aWins = diff !== 0 ? diff > 0 : dossierA.scouterPowerLevel >= dossierB.scouterPowerLevel;
 
@@ -212,7 +410,7 @@ export function compareContenders(
     : ['Pick B', 'Pick A'];
 
   // Craft an in-depth, authentic verdict based on the real specs
-  const cat = category.toLowerCase();
+  const cat = safeCategory.toLowerCase();
 
   if (cat.includes('car') || cat.includes('vehicle')) {
     const hpBadgeWin = winner.badges.find((b) => b.label.includes('Horsepower'))?.value || 'monstrous horsepower';
@@ -246,6 +444,22 @@ export function compareContenders(
   }
 
   if (cat.includes('anime')) {
+    const isTierGap = Math.abs(dossierA.score - dossierB.score) >= 35;
+    if (isTierGap) {
+      const isWinnerOverpowered = winner.score > loser.score;
+      if (isWinnerOverpowered) {
+        return {
+          ranking,
+          verdict: `Under Equalized Arena rules (cosmic powers sealed to 1% mortal limits), ${loser.name}'s tactical technique pushes the duel to the brink before ${winner.name}'s martial arts mastery claims a razor-thin victory!`,
+        };
+      } else {
+        return {
+          ranking,
+          verdict: `Under Equalized Arena rules, ${winner.name}'s tactical terrain mastery and weakness exploitation out-maneuver ${loser.name}'s heavily suppressed power in an astonishing tactical upset!`,
+        };
+      }
+    }
+
     return {
       ranking,
       verdict: `${winner.name} (${winner.badges[0]?.value || 'Cosmic Tier'}) out-scales ${loser.name}: ${winner.headlineFeat}`,

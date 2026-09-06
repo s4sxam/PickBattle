@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { getSocket } from './utils/socket';
-import { Room, Player, GameMode, VotingCardOption, VotingStartedPayload } from './types';
+import { Room, Player, GameMode, VotingCardOption, VotingStartedPayload, UserProfile } from './types';
 import { useGameAudio } from './hooks/useGameAudio';
 import { Header } from './components/Header';
 import { LandingView } from './components/LandingView';
@@ -15,6 +15,10 @@ import { VotingPhase } from './components/VotingPhase';
 import { RevealPhase } from './components/RevealPhase';
 import { LeaderboardPhase } from './components/LeaderboardPhase';
 import { FinalPodiumPhase } from './components/FinalPodiumPhase';
+import { VoiceChatBar } from './components/VoiceChatBar';
+import { GlobalLeaderboardModal } from './components/GlobalLeaderboardModal';
+import { LoginModal } from './components/LoginModal';
+import { getSavedUserProfile, recordGameResult } from './utils/userProfile';
 
 const STORAGE_PLAYER_ID_KEY = 'pickbattle_player_id';
 const STORAGE_ROOM_CODE_KEY = 'pickbattle_room_code';
@@ -25,9 +29,26 @@ export default function App() {
     return typeof window !== 'undefined' ? localStorage.getItem(STORAGE_PLAYER_ID_KEY) : null;
   });
 
+  // User Profile (stored locally in user browser)
+  const [currentUserProfile, setCurrentUserProfile] = useState<UserProfile | null>(() => {
+    return getSavedUserProfile();
+  });
+
   // Crowd Vote mode options sent specifically to this socket
   const [votingOptions, setVotingOptions] = useState<VotingCardOption[]>([]);
   const [mySubmittedPick, setMySubmittedPick] = useState<string | null>(null);
+
+  // Modals
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [isJoinOpen, setIsJoinOpen] = useState(false);
+  const [isQROpen, setIsQROpen] = useState(false);
+  const [isLeaderboardOpen, setIsLeaderboardOpen] = useState(false);
+  const [isLoginOpen, setIsLoginOpen] = useState(false);
+  const [joinCodeParam, setJoinCodeParam] = useState('');
+
+  const [isLoading, setIsLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [recordedGameKey, setRecordedGameKey] = useState<string | null>(null);
 
   // Derived current player
   const me: Player | null =
@@ -46,13 +67,39 @@ export default function App() {
     playLockIn,
   } = useGameAudio({ room, me, autoPlayTransitions: true });
 
-  const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [isJoinOpen, setIsJoinOpen] = useState(false);
-  const [isQROpen, setIsQROpen] = useState(false);
-  const [joinCodeParam, setJoinCodeParam] = useState('');
+  // Sync profile with server Top 100 leaderboard
+  useEffect(() => {
+    if (currentUserProfile) {
+      const socket = getSocket();
+      socket.emit('leaderboard:sync_profile', currentUserProfile);
+    }
+  }, [currentUserProfile?.id]);
 
-  const [isLoading, setIsLoading] = useState(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  // Record stats to browser profile on final match screen
+  useEffect(() => {
+    if (room && room.status === 'final' && me && currentUserProfile) {
+      const key = `${room.code}-${room.createdAt}`;
+      if (recordedGameKey !== key) {
+        setRecordedGameKey(key);
+        const sorted = [...room.players].sort((a, b) => b.score - a.score);
+        const isWinner = sorted[0]?.id === me.id;
+        const scoreEarned = me.score || 0;
+
+        const updated = recordGameResult(
+          currentUserProfile.id,
+          scoreEarned,
+          isWinner,
+          0
+        );
+
+        if (updated) {
+          setCurrentUserProfile(updated);
+          const socket = getSocket();
+          socket.emit('leaderboard:sync_profile', updated);
+        }
+      }
+    }
+  }, [room?.status, room?.code, room?.createdAt, me?.score, currentUserProfile, recordedGameKey]);
 
   // Check URL query parameters for ?room=CODE
   useEffect(() => {
@@ -116,7 +163,6 @@ export default function App() {
         }
       );
     } else if (savedIsHost) {
-      // Clear host key on fresh load
       localStorage.removeItem(STORAGE_ROOM_CODE_KEY);
       localStorage.removeItem(STORAGE_PLAYER_ID_KEY);
       localStorage.removeItem('pickbattle_is_host');
@@ -128,6 +174,7 @@ export default function App() {
       socket.off('error:message', handleError);
     };
   }, [room, playError]);
+
 
   // Actions
   const handleCreateRoom = (hostName: string, avatarEmoji: string) => {
@@ -272,8 +319,11 @@ export default function App() {
       <Header
         room={room}
         me={me}
+        userProfile={currentUserProfile}
         onOpenQR={() => setIsQROpen(true)}
         onLeaveRoom={handleLeaveRoom}
+        onOpenLeaderboard={() => setIsLeaderboardOpen(true)}
+        onOpenProfile={() => setIsLoginOpen(true)}
       />
 
       {/* Main View Area */}
@@ -288,6 +338,9 @@ export default function App() {
               setErrorMsg(null);
               setIsJoinOpen(true);
             }}
+            onOpenLeaderboard={() => setIsLeaderboardOpen(true)}
+            onOpenProfile={() => setIsLoginOpen(true)}
+            currentUserProfile={currentUserProfile}
           />
         ) : room.status === 'lobby' ? (
           <LobbyPhase
@@ -345,6 +398,7 @@ export default function App() {
             me={me}
             onPlayAgain={handlePlayAgain}
             onNewGame={handleLeaveRoom}
+            onOpenLeaderboard={() => setIsLeaderboardOpen(true)}
           />
         ) : null}
       </main>
@@ -361,6 +415,8 @@ export default function App() {
         onSubmit={handleCreateRoom}
         isLoading={isLoading}
         error={errorMsg}
+        defaultName={currentUserProfile?.username}
+        defaultAvatar={currentUserProfile?.avatarEmoji}
       />
 
       <JoinRoomModal
@@ -370,6 +426,8 @@ export default function App() {
         onSubmit={handleJoinRoom}
         isLoading={isLoading}
         error={errorMsg}
+        defaultName={currentUserProfile?.username}
+        defaultAvatar={currentUserProfile?.avatarEmoji}
       />
 
       {room && (
@@ -379,6 +437,38 @@ export default function App() {
           roomCode={room.code}
         />
       )}
+
+      {/* Global Top 100 Leaderboard Modal */}
+      <GlobalLeaderboardModal
+        isOpen={isLeaderboardOpen}
+        onClose={() => setIsLeaderboardOpen(false)}
+        socket={getSocket()}
+        currentUserProfile={currentUserProfile}
+      />
+
+      {/* In-Game Browser Profile & Local Account Modal */}
+      <LoginModal
+        isOpen={isLoginOpen}
+        onClose={() => setIsLoginOpen(false)}
+        currentProfile={currentUserProfile}
+        onProfileUpdated={(profile) => {
+          setCurrentUserProfile(profile);
+          if (profile) {
+            getSocket().emit('leaderboard:sync_profile', profile);
+          }
+        }}
+        onOpenLeaderboard={() => {
+          setIsLoginOpen(false);
+          setIsLeaderboardOpen(true);
+        }}
+      />
+
+      {/* In-Game WebRTC P2P Voice Call & Text Chat Bar */}
+      {room && me && (
+        <VoiceChatBar socket={getSocket()} room={room} me={me} />
+      )}
     </div>
   );
+
+
 }
