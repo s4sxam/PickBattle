@@ -1,0 +1,68 @@
+import { ContenderDossier } from '../types';
+
+export const GAMES_DATABASE: ContenderDossier[] = [
+  {
+    name: 'Kratos (God of War)',
+    aliases: ['kratos', 'ghost of sparta', 'god of war'],
+    category: 'games',
+    universeOrOrigin: 'God of War (Greece / Midgard)',
+    score: 97,
+    scouterPowerLevel: 9650000,
+    badges: [
+      { label: 'Tier', value: 'Pantheon Slayer / God of War', highlight: true },
+      { label: 'Signature Weapons', value: 'Blades of Chaos & Leviathan Axe' },
+      { label: 'Feat', value: 'Overpowered the Titans and slaughtered Olympus & Asgard' },
+      { label: 'Strength', value: 'Flipped Tyr’s multi-realm temple' },
+    ],
+    headlineFeat: 'Single-handedly extinguished the Greek pantheon and defeated Odin and Thor through unbridled Spartan wrath.',
+    verdictSnippet: "Kratos's unstoppable Spartan rage and god-slaying Blades of Chaos dismantle entire pantheons of deities.",
+  },
+  {
+    name: 'Master Chief (John-117)',
+    aliases: ['master chief', 'chief', 'john-117', 'spartan-117'],
+    category: 'games',
+    universeOrOrigin: 'Halo (UNSC Navy)',
+    score: 91,
+    scouterPowerLevel: 8800000,
+    badges: [
+      { label: 'Tier', value: 'Super Soldier / Luck Factor', highlight: true },
+      { label: 'Signature Gear', value: 'MJOLNIR Powered Assault Armor & MA40 Assault Rifle' },
+      { label: 'Feat', value: 'Gave the Covenant back their bomb & destroyed Halo rings' },
+      { label: 'Armor Shield', value: 'Energy Shielding + Titanium Nanocomposite' },
+    ],
+    headlineFeat: 'Fell from outer space atmosphere into planetary soil and got right back up to finish the fight.',
+    verdictSnippet: "Master Chief's MJOLNIR shielding, tactical combat perfection, and supernatural luck defy impossible odds.",
+  },
+  {
+    name: 'Doom Slayer',
+    aliases: ['doom slayer', 'doomguy', 'the slayer'],
+    category: 'games',
+    universeOrOrigin: 'DOOM (Sentinel Prime / Hell)',
+    score: 96,
+    scouterPowerLevel: 9550000,
+    badges: [
+      { label: 'Tier', value: 'Hell Walker / Primordial God', highlight: true },
+      { label: 'Signature Weapons', value: 'BFG 9000 & Crucible Blade' },
+      { label: 'Feat', value: 'Killed the Icon of Sin and the Dark Lord of Creation' },
+      { label: 'Durability', value: 'Impervious Praetor Suit' },
+    ],
+    headlineFeat: 'Trapped in Hell for eons where demons trembled at his approach; fueled by pure, unadulterated righteous fury.',
+    verdictSnippet: "Doom Slayer's unyielding fury and the devastating BFG 9000 rip and tear through demonic and mortal foes alike.",
+  },
+  {
+    name: 'Mario',
+    aliases: ['mario', 'super mario', 'jumpman'],
+    category: 'games',
+    universeOrOrigin: 'Mushroom Kingdom (Nintendo)',
+    score: 90,
+    scouterPowerLevel: 8700000,
+    badges: [
+      { label: 'Tier', value: 'Gaming Mascots Royalty / Star Power', highlight: true },
+      { label: 'Signature Power-Up', value: 'Super Star (Complete Invincibility) & Fire Flower' },
+      { label: 'Feat', value: 'Spun Bowser by the tail and hurled him into planetary mines' },
+      { label: 'Status', value: 'The Most Famous Character in Gaming History' },
+    ],
+    headlineFeat: 'Crossed galaxies, traversed lava worlds, and defeated giant cosmic turtle kings for 40 straight years.',
+    verdictSnippet: "Mario's Super Star invincibility and iconic platforming acrobatics leap over every obstacle with whimsical ease.",
+  },
+];

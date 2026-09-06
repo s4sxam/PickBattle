@@ -1,0 +1,68 @@
+import { ContenderDossier } from '../types';
+
+export const ATHLETES_DATABASE: ContenderDossier[] = [
+  {
+    name: 'Michael Jordan',
+    aliases: ['michael jordan', 'mj', 'air jordan', 'his airness'],
+    category: 'athletes',
+    universeOrOrigin: 'Chicago Bulls / NBA',
+    score: 99,
+    scouterPowerLevel: 9890000,
+    badges: [
+      { label: 'Championships', value: '6 NBA Rings (6-0 Finals Record)', highlight: true },
+      { label: 'Accolades', value: '6x Finals MVP, 5x Regular Season MVP, 10x Scoring Champ' },
+      { label: 'Clutch Gene', value: 'Iconic "Last Shot" vs Utah Jazz (1998)' },
+      { label: 'GOAT Status', value: 'Undisputed Cultural Basketball Titan' },
+    ],
+    headlineFeat: 'Never allowed a Finals series to reach Game 7 while averaging 33.6 PPG in NBA Finals history.',
+    verdictSnippet: "Michael Jordan's unblemished 6-0 Finals record and ferocious killer instinct make him the quintessential sporting champion.",
+  },
+  {
+    name: 'Lionel Messi',
+    aliases: ['lionel messi', 'messi', 'leo messi', 'la pulga'],
+    category: 'athletes',
+    universeOrOrigin: 'FC Barcelona / Argentina National Team',
+    score: 99,
+    scouterPowerLevel: 9880000,
+    badges: [
+      { label: 'Trophies', value: 'FIFA World Cup 2022 Champion', highlight: true },
+      { label: 'Ballon d’Or', value: '8 Ballon d’Or Trophies (World Record)' },
+      { label: 'Historic Peak', value: '91 Goals in a Single Calendar Year (2012)' },
+      { label: 'Playmaking', value: 'Over 350 Official Career Assists' },
+    ],
+    headlineFeat: 'Completed football by winning the 2022 FIFA World Cup, holding the all-time record for both goals and assists at major tournaments.',
+    verdictSnippet: "Lionel Messi's unmatched vision, dribbling sorcery, and complete trophy cabinet crown him football's immortal maestro.",
+  },
+  {
+    name: 'Muhammad Ali',
+    aliases: ['muhammad ali', 'the greatest', 'cassius clay'],
+    category: 'athletes',
+    universeOrOrigin: 'Heavyweight Boxing Champion',
+    score: 98,
+    scouterPowerLevel: 9750000,
+    badges: [
+      { label: 'Titles', value: '3x Undisputed World Heavyweight Champion', highlight: true },
+      { label: 'Famous Bouts', value: 'Rumble in the Jungle (Foreman), Thrilla in Manila (Frazier)' },
+      { label: 'Style', value: '"Float like a butterfly, sting like a bee"' },
+      { label: 'Impact', value: 'Sportsman of the Century (BBC / Sports Illustrated)' },
+    ],
+    headlineFeat: 'Shocked the world by rope-a-doping the ferocious George Foreman in Zaire, standing as the supreme icon of athletic charisma.',
+    verdictSnippet: "Muhammad Ali's blinding hand speed, psychological warfare, and unshakeable courage transcend all sports history.",
+  },
+  {
+    name: 'Usain Bolt',
+    aliases: ['usain bolt', 'lightning bolt'],
+    category: 'athletes',
+    universeOrOrigin: 'Jamaica Track & Field',
+    score: 98,
+    scouterPowerLevel: 9700000,
+    badges: [
+      { label: 'World Records', value: '100m: 9.58 sec | 200m: 19.19 sec', highlight: true },
+      { label: 'Olympic Gold', value: '8x Olympic Gold Medals (Triple-Triple Sprint King)' },
+      { label: 'Top Speed', value: '27.78 mph (44.72 km/h) Foot Speed' },
+      { label: 'Dominance', value: 'Won Olympic 100m while smiling at the camera' },
+    ],
+    headlineFeat: 'Recorded human running history’s highest measured speed of 27.78 mph in Berlin, winning 8 Olympic golds without defeat.',
+    verdictSnippet: "Usain Bolt's untouched 9.58s world record establishes him as the fastest human being to ever walk the earth.",
+  },
+];

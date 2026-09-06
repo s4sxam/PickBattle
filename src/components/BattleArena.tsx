@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Swords, Zap, Crown, ShieldAlert, Sparkles, Check, Flame, Trophy } from 'lucide-react';
+import { Swords, Zap, Crown, ShieldAlert, Sparkles, Check, Flame, Trophy, Info } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { Room, Player, Duel } from '../types';
 import { playScouterTick, playClash, playKO, playTick, playPop, playVoteCast } from '../utils/sound';
+import { findPickDossier } from '../data';
 
 interface BattleArenaProps {
   room: Room;
@@ -25,6 +26,9 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ room, me, onVote }) =>
 
   const pickA = (duel && room.submissions[duel.playerAId]) || 'Wild Pick';
   const pickB = (duel && duel.playerBId && room.submissions[duel.playerBId]) || '';
+
+  const dossierA = useMemo(() => findPickDossier(room.category, pickA), [room.category, pickA]);
+  const dossierB = useMemo(() => (pickB ? findPickDossier(room.category, pickB) : null), [room.category, pickB]);
 
   const isCombatant = me.id === duel?.playerAId || me.id === duel?.playerBId;
   const is2PlayerGame = room.players.filter((p) => p.connected).length <= 2;
@@ -321,6 +325,42 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ room, me, onVote }) =>
             </div>
           </div>
 
+          {/* Canonical Specs Dossier */}
+          {dossierA && (
+            <div className="my-2.5 p-3 rounded-2xl bg-slate-950/80 border border-slate-800/80 text-left">
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 truncate">
+                  {dossierA.universeOrOrigin}
+                </span>
+                <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 font-mono text-[10px] font-bold shrink-0">
+                  Rating {dossierA.score}/100
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-1.5 mb-2">
+                {dossierA.badges.slice(0, 4).map((b, idx) => (
+                  <div
+                    key={idx}
+                    className={`p-1.5 rounded-lg border text-left ${
+                      b.highlight
+                        ? 'bg-amber-500/10 border-amber-500/30 text-amber-200'
+                        : 'bg-slate-900/70 border-slate-800/80 text-slate-300'
+                    }`}
+                  >
+                    <div className="text-[9px] font-bold text-slate-400 uppercase leading-none mb-0.5">
+                      {b.label}
+                    </div>
+                    <div className="text-[11px] font-extrabold truncate text-white">
+                      {b.value}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <p className="text-[11px] text-slate-300 leading-snug line-clamp-2 italic">
+                &ldquo;{dossierA.headlineFeat}&rdquo;
+              </p>
+            </div>
+          )}
+
           {/* Scouter Power Level Meter */}
           <div className="mt-4 p-3.5 rounded-2xl bg-slate-950 border border-emerald-500/30 shadow-inner relative overflow-hidden">
             <div className="flex items-center justify-between text-xs mb-1.5">
@@ -464,6 +504,42 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ room, me, onVote }) =>
                   &quot;{pickB}&quot;
                 </div>
               </div>
+
+              {/* Canonical Specs Dossier */}
+              {dossierB && (
+                <div className="my-2.5 p-3 rounded-2xl bg-slate-950/80 border border-slate-800/80 text-left">
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 truncate">
+                      {dossierB.universeOrOrigin}
+                    </span>
+                    <span className="px-2 py-0.5 rounded-md bg-orange-500/10 border border-orange-500/30 text-orange-300 font-mono text-[10px] font-bold shrink-0">
+                      Rating {dossierB.score}/100
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-1.5 mb-2">
+                    {dossierB.badges.slice(0, 4).map((b, idx) => (
+                      <div
+                        key={idx}
+                        className={`p-1.5 rounded-lg border text-left ${
+                          b.highlight
+                            ? 'bg-orange-500/10 border-orange-500/30 text-orange-200'
+                            : 'bg-slate-900/70 border-slate-800/80 text-slate-300'
+                        }`}
+                      >
+                        <div className="text-[9px] font-bold text-slate-400 uppercase leading-none mb-0.5">
+                          {b.label}
+                        </div>
+                        <div className="text-[11px] font-extrabold truncate text-white">
+                          {b.value}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-[11px] text-slate-300 leading-snug line-clamp-2 italic">
+                    &ldquo;{dossierB.headlineFeat}&rdquo;
+                  </p>
+                </div>
+              )}
 
               {/* Scouter Power Level Meter */}
               <div className="mt-4 p-3.5 rounded-2xl bg-slate-950 border border-orange-500/30 shadow-inner relative overflow-hidden">
